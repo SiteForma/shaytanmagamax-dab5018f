@@ -11,18 +11,18 @@ export default function SkuExplorerPage() {
   useEffect(() => { listSkus().then((s) => { setSkus(s); setLoading(false); }); }, []);
 
   const columns: ColumnDef<any>[] = [
-    { accessorKey: "article", header: "Article", cell: (i) => <span className="text-num font-medium text-ink">{i.getValue() as string}</span> },
-    { accessorKey: "name", header: "Product" },
-    { accessorKey: "category", header: "Category", cell: (i) => <span className="chip">{i.getValue() as string}</span> },
-    { accessorKey: "brand", header: "Brand" },
-    { accessorKey: "unit", header: "Unit", meta: { align: "center" } },
-    { accessorKey: "active", header: "Status", cell: (i) => (i.getValue() ? <span className="text-success text-xs">Active</span> : <span className="text-ink-muted text-xs">Inactive</span>) },
+    { accessorKey: "article", header: "Артикул", cell: (i) => <span className="text-num font-medium text-ink">{i.getValue() as string}</span> },
+    { accessorKey: "name", header: "Товар" },
+    { accessorKey: "category", header: "Категория", cell: (i) => <span className="chip">{i.getValue() as string}</span> },
+    { accessorKey: "brand", header: "Бренд" },
+    { accessorKey: "unit", header: "Ед.", meta: { align: "center" }, cell: (i) => ({ pcs: "шт.", set: "комп.", m: "м" } as any)[i.getValue() as string] ?? (i.getValue() as string) },
+    { accessorKey: "active", header: "Статус", cell: (i) => (i.getValue() ? <span className="text-success text-xs">Активен</span> : <span className="text-ink-muted text-xs">Не активен</span>) },
   ];
 
   return (
     <>
-      <PageHeader eyebrow="Catalog" title="SKU explorer" description="Drill into individual SKUs across the master catalog with stock, sales and reserve context." />
-      <DataTable data={skus} columns={columns} loading={loading} searchKeys={["article", "name", "category", "brand"] as any} searchPlaceholder="Search SKUs by article, name, category…" density="compact" initialPageSize={20} />
+      <PageHeader eyebrow="Каталог" title="Каталог SKU" description="Подробная разбивка по каждому SKU мастер-каталога с контекстом по складу, продажам и резерву." />
+      <DataTable data={skus} columns={columns} loading={loading} searchKeys={["article", "name", "category", "brand"] as any} searchPlaceholder="Поиск по артикулу, наименованию, категории…" density="compact" initialPageSize={20} />
     </>
   );
 }

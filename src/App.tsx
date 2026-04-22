@@ -3,6 +3,7 @@ import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { ThemeProvider } from "@/lib/theme";
 import { AppShell } from "@/components/layout/AppShell";
 import Index from "./pages/Index.tsx";
 import NotFound from "./pages/NotFound.tsx";
@@ -21,28 +22,30 @@ const queryClient = new QueryClient();
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
-    <TooltipProvider>
-      <Toaster />
-      <Sonner />
-      <BrowserRouter>
-        <AppShell>
-          <Routes>
-            <Route path="/" element={<Index />} />
-            <Route path="/reserve" element={<ReservePage />} />
-            <Route path="/sku" element={<SkuExplorerPage />} />
-            <Route path="/clients" element={<ClientsPage />} />
-            <Route path="/stock" element={<StockPage />} />
-            <Route path="/inbound" element={<InboundPage />} />
-            <Route path="/uploads" element={<UploadCenterPage />} />
-            <Route path="/mapping" element={<MappingPage />} />
-            <Route path="/quality" element={<QualityPage />} />
-            <Route path="/ai" element={<AiConsolePage />} />
-            <Route path="/settings" element={<SettingsPage />} />
-            <Route path="*" element={<NotFound />} />
-          </Routes>
-        </AppShell>
-      </BrowserRouter>
-    </TooltipProvider>
+    <ThemeProvider>
+      <TooltipProvider>
+        <Toaster />
+        <Sonner />
+        <BrowserRouter>
+          <AppShell>
+            <Routes>
+              <Route path="/" element={<Index />} />
+              <Route path="/reserve" element={<ReservePage />} />
+              <Route path="/sku" element={<SkuExplorerPage />} />
+              <Route path="/clients" element={<ClientsPage />} />
+              <Route path="/stock" element={<StockPage />} />
+              <Route path="/inbound" element={<InboundPage />} />
+              <Route path="/uploads" element={<UploadCenterPage />} />
+              <Route path="/mapping" element={<MappingPage />} />
+              <Route path="/quality" element={<QualityPage />} />
+              <Route path="/ai" element={<AiConsolePage />} />
+              <Route path="/settings" element={<SettingsPage />} />
+              <Route path="*" element={<NotFound />} />
+            </Routes>
+          </AppShell>
+        </BrowserRouter>
+      </TooltipProvider>
+    </ThemeProvider>
   </QueryClientProvider>
 );
 

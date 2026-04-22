@@ -13,11 +13,11 @@ import { fmtCompact, fmtInt, fmtMonths } from "@/lib/formatters";
 import { Calculator, Download } from "lucide-react";
 
 const STATUS_OPTIONS: { value: ReserveStatus; label: string }[] = [
-  { value: "critical", label: "Critical" },
-  { value: "warning", label: "Warning" },
-  { value: "enough", label: "Enough" },
-  { value: "no_history", label: "No history" },
-  { value: "inbound_helps", label: "Inbound helps" },
+  { value: "critical", label: "Критично" },
+  { value: "warning", label: "Внимание" },
+  { value: "enough", label: "Норма" },
+  { value: "no_history", label: "Нет истории" },
+  { value: "inbound_helps", label: "Закрывает поставка" },
 ];
 
 export default function ReservePage() {
@@ -50,7 +50,7 @@ export default function ReservePage() {
     setLoading(false);
   }
 
-  useEffect(() => { run(); /* initial */ // eslint-disable-next-line
+  useEffect(() => { run(); /* первичный расчёт */ // eslint-disable-next-line
   }, []);
 
   const filtered = useMemo(
@@ -71,33 +71,33 @@ export default function ReservePage() {
   }), [rows]);
 
   const columns: ColumnDef<ReserveRow>[] = [
-    { accessorKey: "clientName", header: "Client", cell: (i) => <span className="font-medium text-ink">{i.getValue() as string}</span> },
-    { accessorKey: "article", header: "Article", cell: (i) => <span className="text-num text-ink-secondary">{i.getValue() as string}</span> },
-    { accessorKey: "productName", header: "Product", cell: (i) => <span className="truncate text-ink">{i.getValue() as string}</span> },
-    { accessorKey: "avgMonthly3m", header: "Sales 3m", meta: { align: "right", mono: true }, cell: (i) => fmtInt(i.getValue() as number) },
-    { accessorKey: "avgMonthly6m", header: "Sales 6m", meta: { align: "right", mono: true }, cell: (i) => fmtInt(i.getValue() as number) },
-    { accessorKey: "demandPerMonth", header: "Demand/mo", meta: { align: "right", mono: true }, cell: (i) => fmtInt(i.getValue() as number) },
-    { accessorKey: "targetReserveQty", header: "Target", meta: { align: "right", mono: true }, cell: (i) => fmtInt(i.getValue() as number) },
-    { accessorKey: "freeStock", header: "Free", meta: { align: "right", mono: true }, cell: (i) => fmtInt(i.getValue() as number) },
-    { accessorKey: "inboundWithinHorizon", header: "Inbound", meta: { align: "right", mono: true }, cell: (i) => fmtInt(i.getValue() as number) },
-    { accessorKey: "shortageQty", header: "Shortage", meta: { align: "right", mono: true }, cell: (i) => {
+    { accessorKey: "clientName", header: "Клиент", cell: (i) => <span className="font-medium text-ink">{i.getValue() as string}</span> },
+    { accessorKey: "article", header: "Артикул", cell: (i) => <span className="text-num text-ink-secondary">{i.getValue() as string}</span> },
+    { accessorKey: "productName", header: "Товар", cell: (i) => <span className="truncate text-ink">{i.getValue() as string}</span> },
+    { accessorKey: "avgMonthly3m", header: "Продажи 3м", meta: { align: "right", mono: true }, cell: (i) => fmtInt(i.getValue() as number) },
+    { accessorKey: "avgMonthly6m", header: "Продажи 6м", meta: { align: "right", mono: true }, cell: (i) => fmtInt(i.getValue() as number) },
+    { accessorKey: "demandPerMonth", header: "Спрос/мес.", meta: { align: "right", mono: true }, cell: (i) => fmtInt(i.getValue() as number) },
+    { accessorKey: "targetReserveQty", header: "Цель", meta: { align: "right", mono: true }, cell: (i) => fmtInt(i.getValue() as number) },
+    { accessorKey: "freeStock", header: "Свободно", meta: { align: "right", mono: true }, cell: (i) => fmtInt(i.getValue() as number) },
+    { accessorKey: "inboundWithinHorizon", header: "Поставка", meta: { align: "right", mono: true }, cell: (i) => fmtInt(i.getValue() as number) },
+    { accessorKey: "shortageQty", header: "Дефицит", meta: { align: "right", mono: true }, cell: (i) => {
       const v = i.getValue() as number;
       return <span className={v > 0 ? "text-danger font-medium" : "text-ink-muted"}>{v > 0 ? `−${fmtInt(v)}` : "0"}</span>;
     } },
-    { accessorKey: "coverageMonths", header: "Coverage", meta: { align: "right", mono: true }, cell: (i) => fmtMonths(i.getValue() as number) },
-    { accessorKey: "status", header: "Status", cell: (i) => <StatusBadge value={i.getValue() as ReserveStatus} /> },
+    { accessorKey: "coverageMonths", header: "Покрытие", meta: { align: "right", mono: true }, cell: (i) => fmtMonths(i.getValue() as number) },
+    { accessorKey: "status", header: "Статус", cell: (i) => <StatusBadge value={i.getValue() as ReserveStatus} /> },
   ];
 
   return (
     <>
       <PageHeader
-        eyebrow="Core workflow"
-        title="Reserve calculator"
-        description="Compute target reserves per DIY client and SKU using configurable horizon, safety factor and demand basis."
+        eyebrow="Ключевой процесс"
+        title="Расчёт резерва"
+        description="Целевой резерв по каждому клиенту DIY и SKU с настраиваемыми горизонтом, коэффициентом безопасности и базой спроса."
         actions={
           <>
-            <Button variant="outline" size="sm" className="h-9 border-line-subtle bg-surface-panel"><Download className="mr-1.5 h-3.5 w-3.5" />Export</Button>
-            <Button size="sm" onClick={run} className="h-9 bg-brand text-brand-foreground hover:bg-brand-hover"><Calculator className="mr-1.5 h-3.5 w-3.5" />Recalculate</Button>
+            <Button variant="outline" size="sm" className="h-9 border-line-subtle bg-surface-panel"><Download className="mr-1.5 h-3.5 w-3.5" />Экспорт</Button>
+            <Button size="sm" onClick={run} className="h-9 bg-brand text-brand-foreground hover:bg-brand-hover"><Calculator className="mr-1.5 h-3.5 w-3.5" />Пересчитать</Button>
           </>
         }
       />
@@ -105,7 +105,7 @@ export default function ReservePage() {
       <section className="panel p-5">
         <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
           <div>
-            <label className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-ink-muted">Clients</label>
+            <label className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-ink-muted">Клиенты</label>
             <select
               multiple
               value={selectedClients}
@@ -116,24 +116,24 @@ export default function ReservePage() {
             </select>
           </div>
           <div>
-            <label className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-ink-muted">Reserve horizon</label>
+            <label className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-ink-muted">Горизонт резерва</label>
             <div className="inline-flex rounded-md border border-line-subtle bg-surface-panel p-0.5">
               {[2, 3].map((h) => (
                 <button key={h} onClick={() => setHorizon(h as 2 | 3)} className={`px-3 py-1.5 text-xs font-medium rounded ${horizon === h ? "bg-brand text-brand-foreground" : "text-ink-secondary hover:text-ink"}`}>
-                  {h} months
+                  {h} мес.
                 </button>
               ))}
             </div>
           </div>
           <div>
-            <label className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-ink-muted">Safety factor</label>
+            <label className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-ink-muted">Коэффициент безопасности</label>
             <input type="range" min="1" max="1.5" step="0.05" value={safety} onChange={(e) => setSafety(+e.target.value)} className="w-full accent-brand" />
             <div className="text-num text-xs text-ink-secondary mt-1">×{safety.toFixed(2)}</div>
           </div>
           <div>
-            <label className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-ink-muted">Demand basis</label>
+            <label className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-ink-muted">База спроса</label>
             <select className="h-9 w-full rounded-md border border-line-subtle bg-surface-panel px-2 text-sm focus-ring">
-              <option>Blended (3m + 6m)</option><option>Trailing 3 months</option><option>Trailing 6 months</option>
+              <option>Смешанная (3м + 6м)</option><option>За 3 месяца</option><option>За 6 месяцев</option>
             </select>
           </div>
         </div>
@@ -141,9 +141,9 @@ export default function ReservePage() {
 
       <section className="panel grid grid-cols-3 divide-x divide-line-subtle">
         {[
-          { label: "Total target", val: totals.target, tone: "" },
-          { label: "Total shortage", val: totals.shortage, tone: "text-danger" },
-          { label: "Inbound coverage", val: totals.inbound, tone: "text-brand" },
+          { label: "Целевой резерв", val: totals.target, tone: "" },
+          { label: "Общий дефицит", val: totals.shortage, tone: "text-danger" },
+          { label: "Покрытие поставкой", val: totals.inbound, tone: "text-brand" },
         ].map((t) => (
           <div key={t.label} className="p-4">
             <div className="text-[11px] uppercase tracking-wide text-ink-muted">{t.label}</div>
@@ -155,6 +155,7 @@ export default function ReservePage() {
       <FilterChips
         value={statusFilter}
         onChange={setStatusFilter}
+        allLabel="Все"
         options={STATUS_OPTIONS.map((s) => ({ ...s, count: counts[s.value] }))}
       />
 
@@ -163,11 +164,11 @@ export default function ReservePage() {
         columns={columns as any}
         loading={loading}
         searchKeys={["clientName", "article", "productName"] as (keyof ReserveRow)[]}
-        searchPlaceholder="Search by client, article, product…"
+        searchPlaceholder="Поиск по клиенту, артикулу, товару…"
         density="compact"
         initialPageSize={20}
         onRowClick={setDrawer}
-        emptyTitle="No matching positions"
+        emptyTitle="Подходящих позиций нет"
       />
 
       <Sheet open={!!drawer} onOpenChange={(o) => !o && setDrawer(null)}>
@@ -180,15 +181,15 @@ export default function ReservePage() {
               </SheetHeader>
               <div className="mt-6 space-y-3 text-sm">
                 {[
-                  ["Avg sales 3m", fmtInt(drawer.avgMonthly3m)],
-                  ["Avg sales 6m", fmtInt(drawer.avgMonthly6m)],
-                  ["Demand/month (×safety)", fmtInt(drawer.demandPerMonth)],
-                  ["Target reserve", fmtInt(drawer.targetReserveQty)],
-                  ["Free stock", fmtInt(drawer.freeStock)],
-                  ["Inbound (60d)", fmtInt(drawer.inboundWithinHorizon)],
-                  ["Available", fmtInt(drawer.availableQty)],
-                  ["Shortage", drawer.shortageQty > 0 ? `−${fmtInt(drawer.shortageQty)}` : "0"],
-                  ["Coverage", fmtMonths(drawer.coverageMonths)],
+                  ["Средние продажи 3м", fmtInt(drawer.avgMonthly3m)],
+                  ["Средние продажи 6м", fmtInt(drawer.avgMonthly6m)],
+                  ["Спрос/мес. (× безопасность)", fmtInt(drawer.demandPerMonth)],
+                  ["Целевой резерв", fmtInt(drawer.targetReserveQty)],
+                  ["Свободный остаток", fmtInt(drawer.freeStock)],
+                  ["Поставка (60 дн.)", fmtInt(drawer.inboundWithinHorizon)],
+                  ["Доступно", fmtInt(drawer.availableQty)],
+                  ["Дефицит", drawer.shortageQty > 0 ? `−${fmtInt(drawer.shortageQty)}` : "0"],
+                  ["Покрытие", fmtMonths(drawer.coverageMonths)],
                 ].map(([k, v]) => (
                   <div key={k} className="flex items-baseline justify-between border-b border-line-subtle/60 pb-2">
                     <span className="text-ink-muted">{k}</span>
