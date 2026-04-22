@@ -16,14 +16,14 @@ export default function Overview() {
   return (
     <>
       <PageHeader
-        eyebrow="Executive summary"
-        title="Reserve & supply intelligence"
-        description="Live operational view across SKUs, DIY networks, stock coverage and inbound deliveries."
+        eyebrow="Сводка для руководства"
+        title="Аналитика резерва и поставок"
+        description="Оперативная картина по SKU, сетям DIY, покрытию склада и входящим поставкам в реальном времени."
         actions={
           <>
-            <Button variant="outline" size="sm" className="h-9 border-line-subtle bg-surface-panel"><Upload className="mr-1.5 h-3.5 w-3.5" />Upload</Button>
-            <Button variant="outline" size="sm" className="h-9 border-line-subtle bg-surface-panel"><ShieldAlert className="mr-1.5 h-3.5 w-3.5" />Issues</Button>
-            <Button size="sm" className="h-9 bg-brand text-brand-foreground hover:bg-brand-hover"><Calculator className="mr-1.5 h-3.5 w-3.5" />Calculate reserve</Button>
+            <Button variant="outline" size="sm" className="h-9 border-line-subtle bg-surface-panel"><Upload className="mr-1.5 h-3.5 w-3.5" />Загрузить</Button>
+            <Button variant="outline" size="sm" className="h-9 border-line-subtle bg-surface-panel"><ShieldAlert className="mr-1.5 h-3.5 w-3.5" />Проблемы</Button>
+            <Button size="sm" className="h-9 bg-brand text-brand-foreground hover:bg-brand-hover"><Calculator className="mr-1.5 h-3.5 w-3.5" />Рассчитать резерв</Button>
           </>
         }
       />
@@ -31,12 +31,12 @@ export default function Overview() {
       <section className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
         {data ? (
           <>
-            <KpiCard label="SKUs tracked" value={data.summary.totalSkusTracked} format="int" icon={Boxes} hint="Active master" />
-            <KpiCard label="DIY clients" value={data.summary.diyClientsUnderReserve} format="int" icon={Building2} hint="Under reserve" />
-            <KpiCard label="At risk" value={data.summary.positionsAtRisk} format="int" icon={AlertTriangle} emphasis="warning" hint="Below target" />
-            <KpiCard label="Reserve shortage" value={data.summary.totalReserveShortage} unit="units" icon={PackageMinus} emphasis="danger" />
-            <KpiCard label="Inbound (60d)" value={data.summary.inboundWithinHorizon} unit="units" icon={Truck} emphasis="brand" />
-            <KpiCard label="Coverage" value={fmtMonths(data.summary.avgCoverageMonths)} format="raw" icon={Activity} hint="Weighted avg" />
+            <KpiCard label="SKU в учёте" value={data.summary.totalSkusTracked} format="int" icon={Boxes} hint="Активный мастер" />
+            <KpiCard label="Клиенты DIY" value={data.summary.diyClientsUnderReserve} format="int" icon={Building2} hint="Под резервом" />
+            <KpiCard label="Под риском" value={data.summary.positionsAtRisk} format="int" icon={AlertTriangle} emphasis="warning" hint="Ниже цели" />
+            <KpiCard label="Дефицит резерва" value={data.summary.totalReserveShortage} unit="шт." icon={PackageMinus} emphasis="danger" />
+            <KpiCard label="Поставки (60д)" value={data.summary.inboundWithinHorizon} unit="шт." icon={Truck} emphasis="brand" />
+            <KpiCard label="Покрытие" value={fmtMonths(data.summary.avgCoverageMonths)} format="raw" icon={Activity} hint="Средневзвешенно" />
           </>
         ) : (
           Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-[120px]" />)
@@ -46,32 +46,32 @@ export default function Overview() {
       <section className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <div className="panel p-5 lg:col-span-2">
           <div className="mb-4 flex items-center justify-between">
-            <SectionTitle>Coverage trend</SectionTitle>
-            <span className="chip">target 2.0 mo</span>
+            <SectionTitle>Динамика покрытия</SectionTitle>
+            <span className="chip">цель 2,0 мес.</span>
           </div>
           {data ? <CoverageAreaChart data={data.coverageSeries} /> : <Skeleton className="h-[220px]" />}
         </div>
         <div className="panel p-5">
           <div className="mb-4 flex items-center justify-between">
-            <SectionTitle>Data freshness</SectionTitle>
+            <SectionTitle>Свежесть данных</SectionTitle>
             <StatusBadge value={data && data.summary.freshnessHours < 6 ? "enough" : "warning"} />
           </div>
           {data ? (
             <div className="space-y-3 text-sm">
               <div className="flex items-baseline justify-between">
-                <span className="text-ink-muted">Last update</span>
+                <span className="text-ink-muted">Последнее обновление</span>
                 <span className="text-num font-medium">{fmtRelative(data.summary.lastUpdate)}</span>
               </div>
               <div className="flex items-baseline justify-between">
-                <span className="text-ink-muted">Sources synced</span>
-                <span className="text-num font-medium">5 / 6</span>
+                <span className="text-ink-muted">Источников синхронизировано</span>
+                <span className="text-num font-medium">5 из 6</span>
               </div>
               <div className="flex items-baseline justify-between">
-                <span className="text-ink-muted">Quality issues</span>
+                <span className="text-ink-muted">Проблемы качества</span>
                 <span className="text-num font-medium">28</span>
               </div>
               <div className="mt-4 rounded-md border border-line-subtle bg-surface-muted/50 p-3 text-xs text-ink-secondary">
-                Reserve calculations use the most recent verified snapshot. Stale sources are excluded from KPIs.
+                Расчёт резерва использует последний проверенный снимок. Устаревшие источники в KPI не учитываются.
               </div>
             </div>
           ) : <Skeleton className="h-[180px]" />}
@@ -81,14 +81,14 @@ export default function Overview() {
       <section className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <div className="panel p-5">
           <div className="mb-4 flex items-center justify-between">
-            <SectionTitle>Inbound vs shortage</SectionTitle>
-            <span className="chip">last 8 months</span>
+            <SectionTitle>Поставки и дефицит</SectionTitle>
+            <span className="chip">за 8 месяцев</span>
           </div>
           {data ? <InboundShortageBarChart data={data.inboundVsShortage} /> : <Skeleton className="h-[220px]" />}
         </div>
         <div className="panel p-5">
           <div className="mb-4 flex items-center justify-between">
-            <SectionTitle>Top risk SKUs</SectionTitle>
+            <SectionTitle>SKU с наибольшим риском</SectionTitle>
             <Sparkles className="h-3.5 w-3.5 text-ink-muted" />
           </div>
           <ul className="divide-y divide-line-subtle">
@@ -100,7 +100,7 @@ export default function Overview() {
                 </div>
                 <div className="text-right">
                   <div className="text-num text-sm font-semibold text-danger">−{fmtCompact(r.shortage)}</div>
-                  <div className="text-[11px] text-ink-muted">{fmtMonths(r.coverageMonths)} cov.</div>
+                  <div className="text-[11px] text-ink-muted">покрытие {fmtMonths(r.coverageMonths)}</div>
                 </div>
               </li>
             ))}
@@ -111,7 +111,7 @@ export default function Overview() {
 
       <section className="panel p-5">
         <div className="mb-4 flex items-center justify-between">
-          <SectionTitle>Most exposed DIY clients</SectionTitle>
+          <SectionTitle>Наиболее уязвимые сети DIY</SectionTitle>
         </div>
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-5">
           {(data?.mostExposedClients ?? []).map((c) => (
@@ -121,10 +121,10 @@ export default function Overview() {
                 <StatusBadge value={c.coverageMonths < 1 ? "critical" : c.coverageMonths < 1.5 ? "warning" : "enough"} />
               </div>
               <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-                <div><div className="text-ink-muted">Shortage</div><div className="text-num font-medium text-ink">{fmtInt(c.shortageQty)}</div></div>
-                <div><div className="text-ink-muted">Critical</div><div className="text-num font-medium text-ink">{c.criticalPositions}</div></div>
-                <div><div className="text-ink-muted">Coverage</div><div className="text-num font-medium text-ink">{fmtMonths(c.coverageMonths)}</div></div>
-                <div><div className="text-ink-muted">Inbound</div><div className="text-num font-medium text-ink">{fmtInt(c.expectedInboundRelief)}</div></div>
+                <div><div className="text-ink-muted">Дефицит</div><div className="text-num font-medium text-ink">{fmtInt(c.shortageQty)}</div></div>
+                <div><div className="text-ink-muted">Критичных</div><div className="text-num font-medium text-ink">{c.criticalPositions}</div></div>
+                <div><div className="text-ink-muted">Покрытие</div><div className="text-num font-medium text-ink">{fmtMonths(c.coverageMonths)}</div></div>
+                <div><div className="text-ink-muted">Поставка</div><div className="text-num font-medium text-ink">{fmtInt(c.expectedInboundRelief)}</div></div>
               </div>
             </div>
           ))}

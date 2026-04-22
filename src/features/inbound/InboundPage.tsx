@@ -12,19 +12,19 @@ export default function InboundPage() {
   useEffect(() => { getInboundTimeline().then((r) => { setRows(r); setLoading(false); }); }, []);
 
   const columns: ColumnDef<any>[] = [
-    { accessorKey: "sku.article", header: "Article", cell: (i) => <span className="text-num font-medium text-ink">{i.row.original.sku.article}</span> },
-    { accessorKey: "sku.name", header: "Product", cell: (i) => i.row.original.sku.name },
-    { accessorKey: "qty", header: "Qty", meta: { align: "right", mono: true }, cell: (i) => fmtInt(i.getValue() as number) },
-    { accessorKey: "eta", header: "ETA", cell: (i) => fmtDate(i.getValue() as string) },
-    { accessorKey: "reserveImpact", header: "Reserve impact", meta: { align: "right", mono: true }, cell: (i) => <span className="text-brand">{fmtInt(i.getValue() as number)}</span> },
-    { accessorKey: "clients", header: "Clients", cell: (i) => (i.row.original.clients as any[]).map((c) => c.name).join(", ") },
-    { accessorKey: "status", header: "Status", cell: (i) => <StatusBadge value={i.getValue() as any} /> },
+    { accessorKey: "sku.article", header: "Артикул", cell: (i) => <span className="text-num font-medium text-ink">{i.row.original.sku.article}</span> },
+    { accessorKey: "sku.name", header: "Товар", cell: (i) => i.row.original.sku.name },
+    { accessorKey: "qty", header: "Кол-во", meta: { align: "right", mono: true }, cell: (i) => fmtInt(i.getValue() as number) },
+    { accessorKey: "eta", header: "Прибытие", cell: (i) => fmtDate(i.getValue() as string) },
+    { accessorKey: "reserveImpact", header: "Закрывает дефицит", meta: { align: "right", mono: true }, cell: (i) => <span className="text-brand">{fmtInt(i.getValue() as number)}</span> },
+    { accessorKey: "clients", header: "Клиенты", cell: (i) => (i.row.original.clients as any[]).map((c) => c.name).join(", ") },
+    { accessorKey: "status", header: "Статус", cell: (i) => <StatusBadge value={i.getValue() as any} /> },
   ];
 
   return (
     <>
-      <PageHeader eyebrow="Supply" title="Inbound deliveries" description="Upcoming receipts by SKU and their projected impact on current shortages." />
-      <DataTable data={rows} columns={columns} loading={loading} searchPlaceholder="Search inbound…" density="compact" initialPageSize={20} />
+      <PageHeader eyebrow="Поставки" title="Входящие поставки" description="Ближайшие поступления по SKU и их прогнозируемое влияние на текущий дефицит." />
+      <DataTable data={rows} columns={columns} loading={loading} searchPlaceholder="Поиск поставок…" density="compact" initialPageSize={20} />
     </>
   );
 }

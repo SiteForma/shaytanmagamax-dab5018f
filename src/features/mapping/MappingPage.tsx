@@ -11,14 +11,14 @@ export default function MappingPage() {
 
   return (
     <>
-      <PageHeader eyebrow="Normalization" title="Data mapping" description="Source fields aligned to the canonical schema, with confidence indicators and review queue." />
+      <PageHeader eyebrow="Нормализация" title="Сопоставление данных" description="Поля источников, выровненные по канонической схеме, с уровнем уверенности и очередью на проверку." />
       <section className="panel overflow-hidden">
         <div className="grid grid-cols-12 border-b border-line-subtle bg-surface-elevated/40 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-muted">
-          <div className="col-span-4">Source field</div>
+          <div className="col-span-4">Поле источника</div>
           <div className="col-span-1" />
-          <div className="col-span-4">Canonical</div>
-          <div className="col-span-2">Sample</div>
-          <div className="col-span-1 text-right">Confidence</div>
+          <div className="col-span-4">Каноническое поле</div>
+          <div className="col-span-2">Пример</div>
+          <div className="col-span-1 text-right">Уверенность</div>
         </div>
         <ul>
           {fields.map((f, i) => (
