@@ -1,96 +1,133 @@
+@import url("https://rsms.me/inter/inter.css");
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
-All colors MUST be HSL.
-*/
+/* ============================================================
+   Shaytan Machine — Premium internal analytics design system
+   Brand: MAGAMAX  |  Primary accent sampled from official logo
+   #FF671F  →  HSL(18, 100%, 56%)
+   All colors HSL. No ad-hoc colors in components.
+   ============================================================ */
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
+    /* --- Brand --- */
+    --brand-primary: 18 100% 56%;          /* #FF671F official MAGAMAX orange */
+    --brand-primary-hover: 18 100% 50%;
+    --brand-primary-soft: 18 90% 56% / 0.12;
+    --brand-primary-foreground: 30 30% 98%;
 
-    --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
+    /* --- Surfaces (dark, warm graphite) --- */
+    --bg: 24 10% 6%;
+    --bg-elevated: 24 8% 9%;
+    --bg-panel: 24 7% 11%;
+    --bg-muted: 24 6% 14%;
+    --bg-hover: 24 6% 16%;
 
-    --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
+    /* --- Text --- */
+    --text-primary: 30 12% 96%;
+    --text-secondary: 30 8% 76%;
+    --text-muted: 30 6% 56%;
+    --text-disabled: 30 5% 38%;
 
-    --primary: 222.2 47.4% 11.2%;
-    --primary-foreground: 210 40% 98%;
+    /* --- Borders --- */
+    --border-subtle: 24 6% 16%;
+    --border-strong: 24 6% 22%;
 
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
+    /* --- Status --- */
+    --success: 152 56% 46%;
+    --success-soft: 152 56% 46% / 0.14;
+    --warning: 38 92% 56%;
+    --warning-soft: 38 92% 56% / 0.14;
+    --danger: 0 75% 58%;
+    --danger-soft: 0 75% 58% / 0.14;
+    --info: 210 88% 62%;
+    --info-soft: 210 88% 62% / 0.14;
 
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
+    /* --- shadcn token bridge (dark default) --- */
+    --background: var(--bg);
+    --foreground: var(--text-primary);
 
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
+    --card: var(--bg-elevated);
+    --card-foreground: var(--text-primary);
 
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
+    --popover: var(--bg-elevated);
+    --popover-foreground: var(--text-primary);
 
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 222.2 84% 4.9%;
+    --primary: var(--brand-primary);
+    --primary-foreground: var(--brand-primary-foreground);
+
+    --secondary: var(--bg-muted);
+    --secondary-foreground: var(--text-primary);
+
+    --muted: var(--bg-muted);
+    --muted-foreground: var(--text-muted);
+
+    --accent: var(--bg-hover);
+    --accent-foreground: var(--text-primary);
+
+    --destructive: var(--danger);
+    --destructive-foreground: 0 0% 98%;
+
+    --border: var(--border-subtle);
+    --input: var(--border-strong);
+    --ring: var(--brand-primary);
 
     --radius: 0.5rem;
 
-    --sidebar-background: 0 0% 98%;
+    /* Sidebar */
+    --sidebar-background: 24 10% 5%;
+    --sidebar-foreground: var(--text-secondary);
+    --sidebar-primary: var(--brand-primary);
+    --sidebar-primary-foreground: var(--brand-primary-foreground);
+    --sidebar-accent: var(--bg-muted);
+    --sidebar-accent-foreground: var(--text-primary);
+    --sidebar-border: var(--border-subtle);
+    --sidebar-ring: var(--brand-primary);
 
-    --sidebar-foreground: 240 5.3% 26.1%;
-
-    --sidebar-primary: 240 5.9% 10%;
-
-    --sidebar-primary-foreground: 0 0% 98%;
-
-    --sidebar-accent: 240 4.8% 95.9%;
-
-    --sidebar-accent-foreground: 240 5.9% 10%;
-
-    --sidebar-border: 220 13% 91%;
-
-    --sidebar-ring: 217.2 91.2% 59.8%;
+    /* Premium shadows */
+    --shadow-panel: 0 1px 0 0 hsl(0 0% 100% / 0.02) inset, 0 8px 24px -12px hsl(0 0% 0% / 0.5);
+    --shadow-elevated: 0 1px 0 0 hsl(0 0% 100% / 0.04) inset, 0 12px 32px -16px hsl(0 0% 0% / 0.6);
+    --shadow-glow: 0 0 0 1px hsl(var(--brand-primary) / 0.4), 0 8px 28px -8px hsl(var(--brand-primary) / 0.35);
   }
 
-  .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
+  /* Optional light theme — kept restrained, secondary priority */
+  .light {
+    --bg: 30 20% 98%;
+    --bg-elevated: 0 0% 100%;
+    --bg-panel: 30 14% 97%;
+    --bg-muted: 30 14% 94%;
+    --bg-hover: 30 14% 90%;
 
-    --card: 222.2 84% 4.9%;
-    --card-foreground: 210 40% 98%;
+    --text-primary: 24 14% 10%;
+    --text-secondary: 24 8% 30%;
+    --text-muted: 24 6% 46%;
 
-    --popover: 222.2 84% 4.9%;
-    --popover-foreground: 210 40% 98%;
+    --border-subtle: 24 10% 88%;
+    --border-strong: 24 10% 78%;
 
-    --primary: 210 40% 98%;
-    --primary-foreground: 222.2 47.4% 11.2%;
+    --background: var(--bg);
+    --foreground: var(--text-primary);
+    --card: var(--bg-elevated);
+    --card-foreground: var(--text-primary);
+    --popover: var(--bg-elevated);
+    --popover-foreground: var(--text-primary);
+    --secondary: var(--bg-muted);
+    --secondary-foreground: var(--text-primary);
+    --muted: var(--bg-muted);
+    --muted-foreground: var(--text-muted);
+    --accent: var(--bg-hover);
+    --accent-foreground: var(--text-primary);
+    --border: var(--border-subtle);
+    --input: var(--border-strong);
 
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
-
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
-
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
-
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 212.7 26.8% 83.9%;
-    --sidebar-background: 240 5.9% 10%;
-    --sidebar-foreground: 240 4.8% 95.9%;
-    --sidebar-primary: 224.3 76.3% 48%;
-    --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 240 3.7% 15.9%;
-    --sidebar-accent-foreground: 240 4.8% 95.9%;
-    --sidebar-border: 240 3.7% 15.9%;
-    --sidebar-ring: 217.2 91.2% 59.8%;
+    --sidebar-background: 30 14% 96%;
+    --sidebar-foreground: var(--text-secondary);
+    --sidebar-accent: var(--bg-muted);
+    --sidebar-accent-foreground: var(--text-primary);
+    --sidebar-border: var(--border-subtle);
   }
 }
 
@@ -99,7 +136,61 @@ All colors MUST be HSL.
     @apply border-border;
   }
 
+  html {
+    font-family: "Inter var", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font-feature-settings: "cv11", "ss01", "ss03", "cv09", "calt";
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
   body {
     @apply bg-background text-foreground;
+    background-image:
+      radial-gradient(1200px 600px at 80% -10%, hsl(var(--brand-primary) / 0.05), transparent 60%),
+      radial-gradient(900px 500px at -10% 110%, hsl(24 14% 14% / 0.6), transparent 60%);
+    background-attachment: fixed;
+  }
+
+  /* Numeric / tabular */
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum", "cv11";
+  }
+
+  /* Refined scrollbars */
+  *::-webkit-scrollbar { width: 10px; height: 10px; }
+  *::-webkit-scrollbar-track { background: transparent; }
+  *::-webkit-scrollbar-thumb {
+    background: hsl(var(--border-strong));
+    border-radius: 8px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  *::-webkit-scrollbar-thumb:hover { background: hsl(var(--text-muted) / 0.5); background-clip: padding-box; border: 2px solid transparent; }
+}
+
+@layer components {
+  .panel {
+    @apply rounded-xl border bg-[hsl(var(--bg-panel))];
+    box-shadow: var(--shadow-panel);
+  }
+  .panel-elevated {
+    @apply rounded-xl border bg-[hsl(var(--bg-elevated))];
+    box-shadow: var(--shadow-elevated);
+  }
+  .hairline {
+    @apply border-[hsl(var(--border-subtle))];
+  }
+  .text-num {
+    @apply tabular-nums tracking-tight;
+  }
+  .chip {
+    @apply inline-flex items-center gap-1.5 rounded-md border border-[hsl(var(--border-subtle))]
+           bg-[hsl(var(--bg-muted))] px-2 py-0.5 text-xs font-medium
+           text-[hsl(var(--text-secondary))];
+  }
+  .focus-ring {
+    @apply outline-none ring-0 focus-visible:ring-2 focus-visible:ring-[hsl(var(--brand-primary))] focus-visible:ring-offset-0;
   }
 }
