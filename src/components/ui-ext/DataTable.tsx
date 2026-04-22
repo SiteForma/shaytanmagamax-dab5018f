@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState } from "react";
 import {
   ColumnDef,
   ColumnFiltersState,
@@ -71,26 +71,23 @@ export function DataTable<T>({
   const [pageSize, setPageSize] = useState(initialPageSize);
 
   const table = useReactTable({
-    data,
-    columns,
+    data: data as any[],
+    columns: columns as ColumnDef<any, any>[],
     state: { sorting, columnFilters, columnVisibility, globalFilter, pagination: { pageIndex: 0, pageSize } },
     onSortingChange: setSorting,
     onColumnFiltersChange: setColumnFilters,
     onColumnVisibilityChange: setColumnVisibility,
     onGlobalFilterChange: setGlobalFilter,
-    globalFilterFn: useMemo(
-      () => (row, _columnId, filterValue: string) => {
-        if (!filterValue) return true;
-        const v = filterValue.toLowerCase();
-        if (searchKeys && searchKeys.length) {
-          return searchKeys.some((k) => String((row.original as any)[k] ?? "").toLowerCase().includes(v));
-        }
-        return Object.values(row.original as any).some((cell) =>
-          String(cell ?? "").toLowerCase().includes(v),
-        );
-      },
-      [searchKeys],
-    ),
+    globalFilterFn: ((row: any, _columnId: string, filterValue: string) => {
+      if (!filterValue) return true;
+      const v = filterValue.toLowerCase();
+      if (searchKeys && searchKeys.length) {
+        return searchKeys.some((k) => String((row.original as any)[k] ?? "").toLowerCase().includes(v));
+      }
+      return Object.values(row.original as any).some((cell) =>
+        String(cell ?? "").toLowerCase().includes(v),
+      );
+    }) as any,
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
@@ -194,7 +191,7 @@ export function DataTable<T>({
               {rows.map((row) => (
                 <tr
                   key={row.id}
-                  onClick={() => onRowClick?.(row.original)}
+                  onClick={() => onRowClick?.(row.original as T)}
                   className={cn(
                     "border-b border-line-subtle/60 transition-colors",
                     "hover:bg-surface-hover/60",
