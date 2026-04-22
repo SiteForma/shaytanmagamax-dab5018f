@@ -8,14 +8,8 @@ interface FilterChipsProps {
   className?: string;
 }
 
-export function FilterChips({
-  options,
-  value,
-  onChange,
-  allLabel = "All",
-  className,
-}: FilterChipsProps) {
-  const items = [{ value: "all" as const, label: allLabel }, ...options];
+export function FilterChips({ options, value, onChange, allLabel = "All", className }: FilterChipsProps) {
+  const items = [{ value: "all", label: allLabel } as { value: string; label: string; count?: number }, ...options];
   return (
     <div className={cn("flex flex-wrap items-center gap-1.5", className)}>
       {items.map((opt) => {
@@ -23,7 +17,7 @@ export function FilterChips({
         return (
           <button
             key={opt.value}
-            onClick={() => onChange(opt.value as T | "all")}
+            onClick={() => onChange(opt.value)}
             className={cn(
               "inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium transition-colors focus-ring",
               active
@@ -32,7 +26,7 @@ export function FilterChips({
             )}
           >
             {opt.label}
-            {"count" in opt && typeof opt.count === "number" ? (
+            {typeof opt.count === "number" ? (
               <span className={cn("rounded px-1 text-[10px]", active ? "bg-brand/20" : "bg-surface-muted text-ink-muted")}>
                 {opt.count}
               </span>
