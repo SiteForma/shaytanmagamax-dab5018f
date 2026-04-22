@@ -117,12 +117,12 @@ export function DataTable<T>({
           <DropdownMenuTrigger asChild>
             <Button variant="outline" size="sm" className="h-8 gap-1.5 border-line-subtle bg-surface-panel">
               <SlidersHorizontal className="h-3.5 w-3.5" />
-              Columns
+              Колонки
               <ChevronDown className="h-3 w-3 opacity-60" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-52">
-            <DropdownMenuLabel className="text-xs">Visible columns</DropdownMenuLabel>
+            <DropdownMenuLabel className="text-xs">Видимые колонки</DropdownMenuLabel>
             <DropdownMenuSeparator />
             {table
               .getAllLeafColumns()
@@ -229,8 +229,8 @@ export function DataTable<T>({
             ? `${table.getState().pagination.pageIndex * pageSize + 1}–${Math.min(
                 (table.getState().pagination.pageIndex + 1) * pageSize,
                 table.getFilteredRowModel().rows.length,
-              )} of ${table.getFilteredRowModel().rows.length}`
-            : "0 results"}
+              )} из ${table.getFilteredRowModel().rows.length}`
+            : "0 результатов"}
         </div>
         <div className="flex items-center gap-2">
           <select
@@ -243,7 +243,7 @@ export function DataTable<T>({
             className="h-7 rounded-md border border-line-subtle bg-surface-panel px-2 text-xs text-ink focus-ring"
           >
             {[10, 20, 50, 100].map((s) => (
-              <option key={s} value={s}>{s} / page</option>
+              <option key={s} value={s}>{s} / стр.</option>
             ))}
           </select>
           <Button
