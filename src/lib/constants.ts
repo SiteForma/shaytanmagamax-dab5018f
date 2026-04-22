@@ -1,19 +1,19 @@
 export const NAV_SECTIONS = [
-  { label: "Overview", path: "/", icon: "LayoutDashboard" as const },
-  { label: "Reserve Calculator", path: "/reserve", icon: "Calculator" as const },
-  { label: "SKU Explorer", path: "/sku", icon: "Boxes" as const },
-  { label: "DIY Networks", path: "/clients", icon: "Building2" as const },
-  { label: "Stock & Coverage", path: "/stock", icon: "Warehouse" as const },
-  { label: "Inbound Deliveries", path: "/inbound", icon: "Truck" as const },
-  { label: "Upload Center", path: "/uploads", icon: "Upload" as const },
-  { label: "Data Mapping", path: "/mapping", icon: "Workflow" as const },
-  { label: "Data Quality", path: "/quality", icon: "ShieldAlert" as const },
-  { label: "AI Console", path: "/ai", icon: "Sparkles" as const },
-  { label: "Settings", path: "/settings", icon: "Settings" as const },
+  { label: "Обзор", path: "/", icon: "LayoutDashboard" as const },
+  { label: "Расчёт резерва", path: "/reserve", icon: "Calculator" as const },
+  { label: "Каталог SKU", path: "/sku", icon: "Boxes" as const },
+  { label: "Сети DIY", path: "/clients", icon: "Building2" as const },
+  { label: "Склад и покрытие", path: "/stock", icon: "Warehouse" as const },
+  { label: "Входящие поставки", path: "/inbound", icon: "Truck" as const },
+  { label: "Центр загрузки", path: "/uploads", icon: "Upload" as const },
+  { label: "Сопоставление данных", path: "/mapping", icon: "Workflow" as const },
+  { label: "Качество данных", path: "/quality", icon: "ShieldAlert" as const },
+  { label: "ИИ-консоль", path: "/ai", icon: "Sparkles" as const },
+  { label: "Настройки", path: "/settings", icon: "Settings" as const },
 ] as const;
 
 export const PRODUCT = {
-  name: "Shaytan Machine",
-  subtitle: "Reserve & Supply Intelligence",
-  org: "MAGAMAX",
+  name: "Шайтан-машина",
+  subtitle: "Аналитика резерва и поставок",
+  org: "МАГАМАКС",
 } as const;
