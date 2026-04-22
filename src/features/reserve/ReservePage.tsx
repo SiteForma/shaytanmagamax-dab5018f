@@ -158,11 +158,11 @@ export default function ReservePage() {
         options={STATUS_OPTIONS.map((s) => ({ ...s, count: counts[s.value] }))}
       />
 
-      <DataTable
+      <DataTable<ReserveRow>
         data={filtered}
-        columns={columns}
+        columns={columns as any}
         loading={loading}
-        searchKeys={["clientName", "article", "productName"]}
+        searchKeys={["clientName", "article", "productName"] as (keyof ReserveRow)[]}
         searchPlaceholder="Search by client, article, product…"
         density="compact"
         initialPageSize={20}
