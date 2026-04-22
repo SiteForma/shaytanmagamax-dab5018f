@@ -31,7 +31,7 @@ export type Density = "compact" | "default" | "comfortable";
 
 interface DataTableProps<T> {
   data: T[];
-  columns: ColumnDef<T, any>[];
+  columns: ColumnDef<any, any>[];
   loading?: boolean;
   searchKeys?: (keyof T)[];
   searchPlaceholder?: string;

@@ -1,22 +1,20 @@
 import { cn } from "@/lib/utils";
-import type { ReactNode } from "react";
 
-interface FilterChipsProps<T extends string> {
-  options: { value: T; label: string; count?: number }[];
-  value: T | "all";
-  onChange: (v: T | "all") => void;
+interface FilterChipsProps {
+  options: { value: string; label: string; count?: number }[];
+  value: string;
+  onChange: (v: any) => void;
   allLabel?: string;
   className?: string;
-  renderExtra?: (v: T) => ReactNode;
 }
 
-export function FilterChips<T extends string>({
+export function FilterChips({
   options,
   value,
   onChange,
   allLabel = "All",
   className,
-}: FilterChipsProps<T>) {
+}: FilterChipsProps) {
   const items = [{ value: "all" as const, label: allLabel }, ...options];
   return (
     <div className={cn("flex flex-wrap items-center gap-1.5", className)}>
