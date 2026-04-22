@@ -93,20 +93,23 @@
     --shadow-glow: 0 0 0 1px hsl(var(--brand-primary) / 0.4), 0 8px 28px -8px hsl(var(--brand-primary) / 0.35);
   }
 
-  /* Optional light theme — kept restrained, secondary priority */
+  /* Светлая тема — премиальная, тёплая, с тем же оранжевым акцентом */
   .light {
-    --bg: 30 20% 98%;
+    --bg: 36 22% 97%;
     --bg-elevated: 0 0% 100%;
-    --bg-panel: 30 14% 97%;
-    --bg-muted: 30 14% 94%;
-    --bg-hover: 30 14% 90%;
+    --bg-panel: 36 18% 98%;
+    --bg-muted: 30 14% 93%;
+    --bg-hover: 30 14% 89%;
 
-    --text-primary: 24 14% 10%;
-    --text-secondary: 24 8% 30%;
+    --text-primary: 24 14% 12%;
+    --text-secondary: 24 8% 28%;
     --text-muted: 24 6% 46%;
+    --text-disabled: 24 5% 64%;
 
-    --border-subtle: 24 10% 88%;
-    --border-strong: 24 10% 78%;
+    --border-subtle: 30 12% 88%;
+    --border-strong: 30 10% 78%;
+
+    --brand-primary-soft: 18 90% 56% / 0.10;
 
     --background: var(--bg);
     --foreground: var(--text-primary);
@@ -123,11 +126,14 @@
     --border: var(--border-subtle);
     --input: var(--border-strong);
 
-    --sidebar-background: 30 14% 96%;
+    --sidebar-background: 30 14% 95%;
     --sidebar-foreground: var(--text-secondary);
     --sidebar-accent: var(--bg-muted);
     --sidebar-accent-foreground: var(--text-primary);
     --sidebar-border: var(--border-subtle);
+
+    --shadow-panel: 0 1px 0 0 hsl(0 0% 100% / 0.6) inset, 0 4px 14px -8px hsl(24 14% 20% / 0.12);
+    --shadow-elevated: 0 1px 0 0 hsl(0 0% 100% / 0.8) inset, 0 8px 24px -12px hsl(24 14% 20% / 0.18);
   }
 }
 
