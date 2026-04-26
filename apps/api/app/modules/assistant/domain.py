@@ -43,7 +43,11 @@ class AssistantRoute:
 class AssistantRoutePlan:
     intent: AssistantIntent | None = None
     tool_question: str | None = None
+    tool_name: str | None = None
     tool_names: list[str] = field(default_factory=list)
+    params: dict[str, Any] = field(default_factory=dict)
+    missing_fields: list[dict[str, Any]] = field(default_factory=list)
+    followup_question: str | None = None
     confidence: float = 0.0
     planner: str = "deterministic"
     rationale: str | None = None
@@ -93,3 +97,8 @@ class AssistantAnswerDraft:
     warnings: list[AssistantWarningData]
     context_used: AssistantResolvedContext
     user_text: str | None = None
+    response_type: str = "answer"
+    missing_fields: list[dict[str, Any]] = field(default_factory=list)
+    suggested_chips: list[str] = field(default_factory=list)
+    pending_intent: str | None = None
+    trace_metadata: dict[str, Any] = field(default_factory=dict)

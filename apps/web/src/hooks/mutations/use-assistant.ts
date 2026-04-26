@@ -5,7 +5,9 @@ import {
   createAssistantSession,
   deleteAssistantSession,
   postAssistantMessage,
+  streamAssistantMessage,
   updateAssistantSession,
+  type AssistantStreamEvent,
   type AssistantPayload,
   type CreateAssistantSessionPayload,
   type UpdateAssistantSessionPayload,
@@ -33,10 +35,17 @@ export function useAssistantMessageMutation() {
     mutationFn: ({
       sessionId,
       payload,
+      onEvent,
+      signal,
     }: {
       sessionId: string;
       payload: AssistantPayload;
-    }) => postAssistantMessage(sessionId, payload),
+      onEvent?: (event: AssistantStreamEvent) => void;
+      signal?: AbortSignal;
+    }) =>
+      onEvent
+        ? streamAssistantMessage(sessionId, payload, { onEvent, signal })
+        : postAssistantMessage(sessionId, payload),
     onSuccess: (result) => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.assistant.sessions() });
       void queryClient.invalidateQueries({

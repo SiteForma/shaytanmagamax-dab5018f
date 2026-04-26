@@ -180,19 +180,19 @@ describe("AiConsolePage", () => {
     expect(await screen.findByText("Ниже резерва 2 позиции.")).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Расчёт резерва выполнен" })).not.toBeInTheDocument();
     expect(screen.getByText("2 сообщений: 12 руб.")).toBeInTheDocument();
-    expect(screen.queryByText("Reserve Run run_1")).not.toBeInTheDocument();
+    expect(screen.getByText("Reserve Run run_1")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /подробнее/i }));
 
     expect(await screen.findByRole("heading", { name: "Подробнее" })).toBeInTheDocument();
-    expect(screen.getByText("Reserve Run run_1")).toBeInTheDocument();
+    expect(screen.getAllByText("Reserve Run run_1").length).toBeGreaterThanOrEqual(2);
     expect(screen.getByText("Трассировка и вызовы инструментов")).toBeInTheDocument();
     expect(screen.getByText("calculate_reserve")).toBeInTheDocument();
     fireEvent.click(screen.getByText("Показать critical"));
     await waitFor(() =>
-      expect(mutateAsync).toHaveBeenCalledWith({
+      expect(mutateAsync).toHaveBeenCalledWith(expect.objectContaining({
         sessionId: "asess_1",
         payload: expect.objectContaining({ text: "Покажи critical" }),
-      }),
+      })),
     );
   });
 
@@ -260,6 +260,82 @@ describe("AiConsolePage", () => {
     expect(screen.getByText("Можно писать свободно, но только в контуре MAGAMAX.")).toBeInTheDocument();
   });
 
+  it("renders clarification fields and chips inline", async () => {
+    mockBaseQueries();
+    useAssistantSessionsQuery.mockReturnValue({
+      data: [
+        {
+          id: "asess_clarify",
+          title: "Уточнение",
+          status: "active",
+          createdAt: "2026-04-23T10:00:00Z",
+          updatedAt: "2026-04-23T10:00:00Z",
+          lastMessageAt: "2026-04-23T10:05:00Z",
+          messageCount: 1,
+          pinnedContext: {},
+          lastIntent: "reserve_calculation",
+          preferredMode: "deterministic",
+          provider: "deterministic",
+        },
+      ],
+      error: null,
+    });
+    useAssistantMessagesQuery.mockReturnValue({
+      data: [
+        {
+          id: "msg_clarify",
+          sessionId: "asess_clarify",
+          role: "assistant",
+          text: "По какому клиенту посчитать резерв?",
+          createdAt: "2026-04-23T10:02:00Z",
+          status: "needs_clarification",
+          context: {},
+          response: {
+            answerId: "ans_clarify",
+            sessionId: "asess_clarify",
+            type: "clarification",
+            intent: "reserve_calculation",
+            status: "needs_clarification",
+            confidence: 0.62,
+            title: "Нужно уточнение",
+            summary: "По какому клиенту посчитать резерв?",
+            sections: [],
+            sourceRefs: [],
+            toolCalls: [],
+            followups: [],
+            warnings: [],
+            createdAt: "2026-04-23T10:02:00Z",
+            provider: "deterministic",
+            traceId: "trace_clarify",
+            contextUsed: {},
+            missingFields: [{ name: "client_id", label: "клиент", question: "По какому клиенту?" }],
+            suggestedChips: ["OBI Россия", "Леман Про"],
+            pendingIntent: "reserve_calculation",
+          },
+        },
+      ],
+      error: null,
+    });
+    const mutateAsync = vi.fn().mockResolvedValue({});
+    useCreateAssistantSessionMutation.mockReturnValue({ mutateAsync: vi.fn(), isPending: false });
+    useUpdateAssistantSessionMutation.mockReturnValue({ mutateAsync: vi.fn(), isPending: false, error: null });
+    useDeleteAssistantSessionMutation.mockReturnValue({ mutateAsync: vi.fn(), isPending: false, error: null });
+    useAssistantMessageMutation.mockReturnValue({ mutateAsync, isPending: false, error: null });
+
+    renderWithProviders(<AiConsolePage />, "/ai?session=asess_clarify");
+
+    expect(await screen.findByText("По какому клиенту посчитать резерв?")).toBeInTheDocument();
+    expect(screen.getByText("Нужно уточнение")).toBeInTheDocument();
+    expect(screen.getByText("Не хватает: клиент")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "OBI Россия" }));
+    await waitFor(() =>
+      expect(mutateAsync).toHaveBeenCalledWith(expect.objectContaining({
+        sessionId: "asess_clarify",
+        payload: expect.objectContaining({ text: "OBI Россия" }),
+      })),
+    );
+  });
+
   it("creates a new session before sending the first question", async () => {
     mockBaseQueries();
     useAssistantSessionsQuery.mockReturnValue({ data: [], error: null });
@@ -298,10 +374,10 @@ describe("AiConsolePage", () => {
 
     await waitFor(() => expect(createMutateAsync).toHaveBeenCalled());
     await waitFor(() =>
-      expect(messageMutateAsync).toHaveBeenCalledWith({
+      expect(messageMutateAsync).toHaveBeenCalledWith(expect.objectContaining({
         sessionId: "asess_2",
         payload: expect.objectContaining({ text: "Покажи текущий дефицит" }),
-      }),
+      })),
     );
   });
 

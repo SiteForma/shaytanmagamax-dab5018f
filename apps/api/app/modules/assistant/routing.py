@@ -162,6 +162,12 @@ def _detect_intent(question: str) -> str:
         return "unsupported_or_ambiguous"
     if _is_management_report_question(q):
         return "management_report_summary"
+    if any(token in q for token in ("сравни", "сравнить", "сравнение")) and any(
+        token in q for token in ("месяц", "период", "прошл")
+    ):
+        return "period_comparison"
+    if any(token in q for token in ("продаж", "sales", "реализац")):
+        return "sales_summary"
     if any(token in q for token in ("объясни", "почему", "why", "fallback")) and any(
         token in q for token in ("резерв", "дефицит", "critical", "критич", "shortage", "sku")
     ):
@@ -172,7 +178,7 @@ def _detect_intent(question: str) -> str:
         return "diy_coverage_check"
     if any(token in q for token in ("постав", "inbound", "incoming", "eta")):
         return "inbound_impact"
-    if any(token in q for token in ("склад", "stock risk", "stockout", "coverage", "покрытие")):
+    if any(token in q for token in ("склад", "stock risk", "stockout", "coverage", "покрытие", "зоне риска", "зона риска")):
         return "stock_risk_summary"
     if any(token in q for token in ("качество", "quality", "issue", "проблемы данных")):
         return "quality_issue_summary"
@@ -200,11 +206,13 @@ def _extract_client_id(db: Session, question: str) -> tuple[str | None, str | No
             client = resolve_client_by_name_or_alias(db, alias.alias)
             if client is not None:
                 return client.id, client.name
-    direct_names = {
-        alias.client_id: alias.alias for alias in aliases
-    }
-    for _client_id, candidate in direct_names.items():
-        if candidate.lower() in q:
+    for alias in aliases:
+        candidate = alias.alias
+        candidate_normalized = candidate.lower()
+        candidate_tokens = [token for token in candidate_normalized.split() if len(token) >= 3]
+        if candidate_normalized in q or any(
+            re.search(rf"(?<!\w){re.escape(token)}(?!\w)", q) for token in candidate_tokens
+        ):
             client = resolve_client_by_name_or_alias(db, candidate)
             if client is not None:
                 return client.id, client.name

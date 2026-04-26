@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import date, datetime
+from decimal import Decimal
 from time import perf_counter
 
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from apps.api.app.db.models import Client, SalesFact, Sku
 from apps.api.app.modules.assistant.domain import (
     AssistantContextBundle,
     AssistantToolExecution,
@@ -101,6 +105,33 @@ def _source_ref(
         "route": route,
         "detail": detail,
     }
+
+
+def _parse_date(value: object) -> date | None:
+    if value is None:
+        return None
+    if isinstance(value, date):
+        return value
+    text = str(value).strip()
+    if not text:
+        return None
+    if len(text) == 7:
+        text = f"{text}-01"
+    try:
+        return datetime.fromisoformat(text).date().replace(day=1)
+    except ValueError:
+        return None
+
+
+def _period_bounds(value: object) -> tuple[date | None, date | None]:
+    start = _parse_date(value)
+    if start is None:
+        return None, None
+    if start.month == 12:
+        end = date(start.year + 1, 1, 1)
+    else:
+        end = date(start.year, start.month + 1, 1)
+    return start, end
 
 
 def tool_calculate_reserve(
@@ -652,3 +683,190 @@ def _management_report_payload(
         refs,
         [],
     )
+
+
+def tool_get_sales_summary(
+    db: Session,
+    bundle: AssistantContextBundle,
+    params: dict[str, object],
+) -> AssistantToolExecution:
+    return _measure_tool(
+        "get_sales_summary",
+        {
+            "date_from": params.get("date_from"),
+            "date_to": params.get("date_to"),
+            "client_id": params.get("client_id") or bundle.context.selected_client_id,
+            "sku_id": params.get("sku_id") or bundle.context.selected_sku_id,
+        },
+        lambda: _sales_summary_payload(db, bundle, params),
+    )
+
+
+def _sales_summary_payload(
+    db: Session,
+    bundle: AssistantContextBundle,
+    params: dict[str, object],
+) -> tuple[object, str, list[dict[str, object]], list[AssistantWarningData]]:
+    date_from = _parse_date(params.get("date_from"))
+    date_to = _parse_date(params.get("date_to"))
+    if date_from is None or date_to is None:
+        return (
+            {"status": "missing_fields"},
+            "Для сводки продаж нужен корректный период",
+            [],
+            [AssistantWarningData(code="missing_period", message="Укажите период продаж.", severity="warning")],
+        )
+    statement = select(
+        func.coalesce(func.sum(SalesFact.quantity), 0),
+        func.coalesce(func.sum(SalesFact.revenue_amount), 0),
+        func.count(SalesFact.id),
+    ).where(SalesFact.period_month >= date_from, SalesFact.period_month <= date_to)
+    client_id = str(params.get("client_id") or bundle.context.selected_client_id or "") or None
+    sku_id = str(params.get("sku_id") or bundle.context.selected_sku_id or "") or None
+    if client_id:
+        statement = statement.where(SalesFact.client_id == client_id)
+    if sku_id:
+        statement = statement.where(SalesFact.sku_id == sku_id)
+
+    total_qty, total_revenue, row_count = db.execute(statement).one()
+    client = db.get(Client, client_id) if client_id else None
+    sku = db.get(Sku, sku_id) if sku_id else None
+    payload = {
+        "status": "completed" if row_count else "no_data",
+        "date_from": date_from.isoformat(),
+        "date_to": date_to.isoformat(),
+        "client_id": client_id,
+        "client_name": client.name if client else None,
+        "sku_id": sku_id,
+        "sku_article": sku.article if sku else None,
+        "quantity": float(total_qty or 0),
+        "revenue": float(total_revenue or 0),
+        "row_count": int(row_count or 0),
+    }
+    refs = [
+        _source_ref(
+            source_type="sales",
+            source_label="Sales facts",
+            entity_type="sales_fact",
+            entity_id=client_id or sku_id,
+            role="primary",
+            route="/sales",
+            detail=f"{payload['row_count']} строк за период",
+        )
+    ]
+    warnings = []
+    if not row_count:
+        warnings.append(
+            AssistantWarningData(
+                code="sales_no_data",
+                message="За выбранный период и фильтры продаж не найдено.",
+                severity="warning",
+            )
+        )
+    return payload, f"Сводка продаж: {payload['row_count']} строк", refs, warnings
+
+
+def tool_get_period_comparison(
+    db: Session,
+    bundle: AssistantContextBundle,
+    params: dict[str, object],
+) -> AssistantToolExecution:
+    return _measure_tool(
+        "get_period_comparison",
+        {
+            "metric": params.get("metric"),
+            "current_period": params.get("current_period"),
+            "previous_period": params.get("previous_period"),
+            "client_id": params.get("client_id") or bundle.context.selected_client_id,
+            "sku_id": params.get("sku_id") or bundle.context.selected_sku_id,
+        },
+        lambda: _period_comparison_payload(db, bundle, params),
+    )
+
+
+def _period_sales_value(
+    db: Session,
+    *,
+    metric: str,
+    period: object,
+    client_id: str | None,
+    sku_id: str | None,
+) -> tuple[float, int]:
+    start, end_exclusive = _period_bounds(period)
+    if start is None or end_exclusive is None:
+        return 0.0, 0
+    field = SalesFact.quantity if metric == "quantity" else SalesFact.revenue_amount
+    statement = select(func.coalesce(func.sum(field), 0), func.count(SalesFact.id)).where(
+        SalesFact.period_month >= start,
+        SalesFact.period_month < end_exclusive,
+    )
+    if client_id:
+        statement = statement.where(SalesFact.client_id == client_id)
+    if sku_id:
+        statement = statement.where(SalesFact.sku_id == sku_id)
+    value, row_count = db.execute(statement).one()
+    if isinstance(value, Decimal):
+        value = float(value)
+    return float(value or 0), int(row_count or 0)
+
+
+def _period_comparison_payload(
+    db: Session,
+    bundle: AssistantContextBundle,
+    params: dict[str, object],
+) -> tuple[object, str, list[dict[str, object]], list[AssistantWarningData]]:
+    metric = str(params.get("metric") or "revenue").strip()
+    metric = "quantity" if metric in {"qty", "quantity", "sales_qty", "продажи"} else "revenue"
+    client_id = str(params.get("client_id") or bundle.context.selected_client_id or "") or None
+    sku_id = str(params.get("sku_id") or bundle.context.selected_sku_id or "") or None
+    current_value, current_count = _period_sales_value(
+        db,
+        metric=metric,
+        period=params.get("current_period"),
+        client_id=client_id,
+        sku_id=sku_id,
+    )
+    previous_value, previous_count = _period_sales_value(
+        db,
+        metric=metric,
+        period=params.get("previous_period"),
+        client_id=client_id,
+        sku_id=sku_id,
+    )
+    delta = current_value - previous_value
+    delta_pct = None if previous_value == 0 else delta / previous_value * 100
+    payload = {
+        "status": "completed" if current_count or previous_count else "no_data",
+        "metric": metric,
+        "current_period": params.get("current_period"),
+        "previous_period": params.get("previous_period"),
+        "current_value": current_value,
+        "previous_value": previous_value,
+        "delta": delta,
+        "delta_pct": delta_pct,
+        "current_row_count": current_count,
+        "previous_row_count": previous_count,
+        "client_id": client_id,
+        "sku_id": sku_id,
+    }
+    refs = [
+        _source_ref(
+            source_type="sales",
+            source_label="Sales period comparison",
+            entity_type="sales_fact",
+            entity_id=client_id or sku_id,
+            role="primary",
+            route="/sales",
+            detail=f"{current_count + previous_count} строк в сравнении",
+        )
+    ]
+    warnings = []
+    if not current_count and not previous_count:
+        warnings.append(
+            AssistantWarningData(
+                code="comparison_no_data",
+                message="Для выбранных периодов данных продаж не найдено.",
+                severity="warning",
+            )
+        )
+    return payload, "Сравнение периодов по продажам собрано", refs, warnings

@@ -358,8 +358,12 @@ export type AssistantIntent =
   | "upload_status_summary"
   | "quality_issue_summary"
   | "management_report_summary"
+  | "sales_summary"
+  | "period_comparison"
   | "free_chat"
   | "unsupported_or_ambiguous";
+
+export type AssistantResponseType = "answer" | "clarification";
 
 export type AssistantResponseStatus =
   | "completed"
@@ -374,7 +378,8 @@ export type AssistantSectionType =
   | "reserve_table_preview"
   | "source_list"
   | "warning_block"
-  | "next_actions";
+  | "next_actions"
+  | "clarification";
 
 export interface AssistantPinnedContext {
   selectedClientId?: ID | null;
@@ -443,9 +448,17 @@ export interface AssistantTokenUsage {
   estimatedCostRub: number;
 }
 
+export interface AssistantMissingField {
+  name: string;
+  label?: string | null;
+  question?: string | null;
+  type?: string | null;
+}
+
 export interface AssistantResponse {
   answerId: ID;
   sessionId?: ID | null;
+  type?: AssistantResponseType;
   intent: AssistantIntent;
   status: AssistantResponseStatus;
   confidence: number;
@@ -461,6 +474,10 @@ export interface AssistantResponse {
   tokenUsage?: AssistantTokenUsage;
   traceId: ID;
   contextUsed: AssistantPinnedContext;
+  missingFields?: AssistantMissingField[];
+  suggestedChips?: string[];
+  pendingIntent?: AssistantIntent | null;
+  traceMetadata?: Record<string, unknown>;
 }
 
 export interface AssistantMessage {

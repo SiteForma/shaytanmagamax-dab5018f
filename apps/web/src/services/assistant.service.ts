@@ -1,6 +1,7 @@
 import type {
   AssistantCapabilities,
   AssistantContextOptions,
+  AssistantMessage,
   AssistantPinnedContext,
   AssistantPromptSuggestion,
   AssistantResponse,
@@ -23,6 +24,91 @@ export interface AssistantPayload {
   sessionId?: string;
   preferredMode?: string;
   context?: AssistantPinnedContext;
+}
+
+export type AssistantStreamEvent =
+  | { type: "thinking"; sessionId?: string; stage?: string; message: string; userMessage?: AssistantMessage }
+  | {
+      type: "clarification";
+      messageId: string;
+      responseId: string;
+      intent: AssistantResponse["intent"];
+      summary: string;
+      missingFields: AssistantResponse["missingFields"];
+      suggestedChips: string[];
+      pendingIntent: AssistantResponse["pendingIntent"];
+    }
+  | {
+      type: "tool_call";
+      messageId: string;
+      responseId: string;
+      toolName: string;
+      arguments: Record<string, unknown>;
+    }
+  | {
+      type: "tool_result";
+      messageId: string;
+      responseId: string;
+      toolName: string;
+      status: AssistantResponse["toolCalls"][number]["status"];
+      summary: string;
+      latencyMs: number;
+    }
+  | { type: "answer_delta"; messageId: string; responseId?: string; delta: string }
+  | { type: "done"; result: AssistantSessionMessageResult }
+  | { type: "error"; code: string; message: string };
+
+function assistantStreamEventApiToViewModel(event: any): AssistantStreamEvent {
+  if (event.type === "thinking") {
+    return {
+      type: "thinking",
+      sessionId: event.sessionId,
+      stage: event.stage,
+      message: event.message ?? "",
+      userMessage: event.userMessage ? assistantMessageApiToViewModel(event.userMessage) : undefined,
+    };
+  }
+  if (event.type === "clarification") {
+    return {
+      type: "clarification",
+      messageId: event.messageId,
+      responseId: event.responseId,
+      intent: event.intent,
+      summary: event.summary ?? "",
+      missingFields: event.missingFields ?? [],
+      suggestedChips: event.suggestedChips ?? [],
+      pendingIntent: event.pendingIntent ?? null,
+    };
+  }
+  if (event.type === "done" || event.type === "final") {
+    return {
+      type: "done",
+      result: assistantSessionMessageResultApiToViewModel(event.result),
+    };
+  }
+  if (event.type === "assistant_delta") {
+    return {
+      type: "answer_delta",
+      messageId: event.messageId,
+      responseId: event.responseId,
+      delta: event.delta ?? "",
+    };
+  }
+  if (event.type === "status") {
+    return {
+      type: "thinking",
+      stage: event.status,
+      message: event.message ?? "",
+    };
+  }
+  if (event.type === "user_message") {
+    return {
+      type: "thinking",
+      message: "Сообщение сохранено.",
+      userMessage: assistantMessageApiToViewModel(event.message),
+    };
+  }
+  return event as AssistantStreamEvent;
 }
 
 export interface CreateAssistantSessionPayload {
@@ -101,6 +187,43 @@ export async function postAssistantMessage(
     context: payload.context,
   });
   return assistantSessionMessageResultApiToViewModel(response);
+}
+
+export async function streamAssistantMessage(
+  sessionId: string,
+  payload: AssistantPayload,
+  options: {
+    onEvent?: (event: AssistantStreamEvent) => void;
+    signal?: AbortSignal;
+  } = {},
+): Promise<AssistantSessionMessageResult> {
+  let finalResult: AssistantSessionMessageResult | null = null;
+  let streamError: { code: string; message: string } | null = null;
+  await api.stream<any>(`/assistant/sessions/${sessionId}/messages/stream`, {
+    body: {
+      text: payload.text,
+      preferredMode: payload.preferredMode ?? "deterministic",
+      context: payload.context,
+    },
+    signal: options.signal,
+    onEvent: (event) => {
+      const normalized = assistantStreamEventApiToViewModel(event);
+      if (normalized.type === "done") {
+        finalResult = normalized.result;
+      }
+      if (normalized.type === "error") {
+        streamError = { code: normalized.code, message: normalized.message };
+      }
+      options.onEvent?.(normalized);
+    },
+  });
+  if (streamError) {
+    throw new Error(streamError.message);
+  }
+  if (!finalResult) {
+    throw new Error("Поток ответа завершился без финального результата");
+  }
+  return finalResult;
 }
 
 export async function getAssistantCapabilities(): Promise<AssistantCapabilities> {

@@ -48,21 +48,42 @@ Pinned context отправляется в backend на каждый message sub
 Фронт больше не ждёт один `answer` string.
 AI Console рендерит:
 
-- `title`
 - `summary`
 - `sections`
 - `sourceRefs`
 - `followups`
 - `warnings`
+- `missingFields`
+- `suggestedChips`
+- `pendingIntent`
 
 Отдельно рендерятся:
 
 - metric cards;
 - preview tables;
-- source refs block;
+- source refs inline под ответом и полный source refs block в `Подробнее`;
+- clarification panel с missing fields и chips;
 - trace id и tool-call inspector;
 - next-step chips;
 - warning panel.
+
+### Streaming
+
+Основной режим ответа — настоящий SSE stream через
+`POST /api/assistant/sessions/{session_id}/messages/stream`.
+
+Frontend client читает server events:
+
+- `thinking`
+- `clarification`
+- `tool_call`
+- `tool_result`
+- `answer_delta`
+- `done`
+- `error`
+
+Fake typewriter не используется как основной режим. Текст появляется из `answer_delta`,
+а `done` заменяет локальные optimistic messages на persisted `userMessage` и `assistantMessage`.
 
 ## Query / Mutation Pattern
 
@@ -110,3 +131,4 @@ Mutations:
 - saved assistant views;
 - LLM-composed prose поверх того же response shape;
 - role-aware assistant behavior.
+- более богатый realtime tool-progress UI поверх уже существующих `tool_call` / `tool_result`.

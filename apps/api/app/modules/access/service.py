@@ -25,6 +25,7 @@ KNOWN_CAPABILITIES: tuple[Capability, ...] = (
     ("mapping", "write"),
     ("quality", "read"),
     ("quality", "resolve"),
+    ("reports", "read"),
     ("assistant", "query"),
     ("exports", "generate"),
     ("exports", "download"),

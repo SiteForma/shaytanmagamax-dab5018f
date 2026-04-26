@@ -59,7 +59,7 @@ def test_assistant_rejects_out_of_scope_questions(client: TestClient) -> None:
     assert payload["status"] == "unsupported"
     assert payload["provider"] == "deterministic"
     assert payload["toolCalls"] == []
-    assert "Шайтан-машина отвечает только" in payload["summary"]
+    assert "Я могу помочь только с работой MAGAMAX" in payload["summary"]
     assert any(warning["code"] == "out_of_scope_or_ambiguous" for warning in payload["warnings"])
 
 

@@ -70,6 +70,28 @@ Response:
 - `assistantMessage`
 - `response`
 
+### `POST /sessions/{session_id}/messages/stream`
+
+Пишет user message, запускает orchestration и отдаёт настоящий SSE stream.
+
+Response headers:
+
+- `Content-Type: text/event-stream`
+- `Cache-Control: no-cache`
+- `X-Accel-Buffering: no`
+
+Server events:
+
+- `thinking` — backend принял запрос, сохранил user message или планирует инструменты.
+- `clarification` — assistant просит уточнить параметры; содержит `missingFields`, `suggestedChips`, `pendingIntent`.
+- `tool_call` — backend вызывает allowlisted domain tool.
+- `tool_result` — domain tool вернул результат или безопасную ошибку.
+- `answer_delta` — chunk текста ответа для реального streaming UI.
+- `done` — финальный `AssistantSessionMessageResult`.
+- `error` — structured stream error.
+
+Frontend не должен имитировать основной typing-режим поверх готового ответа. Основной режим — читать `answer_delta`.
+
 ## Stateless Query
 
 ### `POST /query`
@@ -150,6 +172,11 @@ Frontend использует `PATCH /sessions/{id}` для:
 - `traceId`
 - `provider`
 - `contextUsed`
+- `type` (`answer` / `clarification`)
+- `missingFields[]`
+- `suggestedChips[]`
+- `pendingIntent`
+- `traceMetadata`
 
 Для `intent: "free_chat"` поле `toolCalls` обычно пустое, а `sourceRefs` может быть пустым.
 Это означает, что ответ был доменным conversational-ответом и не использовал operational data sources.

@@ -24,6 +24,7 @@ export function assistantResponseApiToViewModel(response: any): AssistantRespons
   return {
     answerId: response.answerId ?? response.answer_id ?? response.id,
     sessionId: response.sessionId ?? response.session_id ?? null,
+    type: response.type ?? response.responseType ?? response.response_type ?? "answer",
     intent: response.intent,
     status: response.status,
     confidence: response.confidence ?? 0,
@@ -45,6 +46,10 @@ export function assistantResponseApiToViewModel(response: any): AssistantRespons
     },
     traceId: response.traceId ?? response.trace_id ?? "",
     contextUsed: normalizePinnedContext(response.contextUsed ?? response.context_used ?? {}),
+    missingFields: response.missingFields ?? response.missing_fields ?? [],
+    suggestedChips: response.suggestedChips ?? response.suggested_chips ?? [],
+    pendingIntent: response.pendingIntent ?? response.pending_intent ?? null,
+    traceMetadata: response.traceMetadata ?? response.trace_metadata ?? {},
   };
 }
 

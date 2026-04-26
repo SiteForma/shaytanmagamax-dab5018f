@@ -17,9 +17,12 @@ AssistantIntent = Literal[
     "upload_status_summary",
     "quality_issue_summary",
     "management_report_summary",
+    "sales_summary",
+    "period_comparison",
     "free_chat",
     "unsupported_or_ambiguous",
 ]
+AssistantResponseType = Literal["answer", "clarification"]
 AssistantResponseStatus = Literal[
     "completed",
     "partial",
@@ -34,6 +37,7 @@ AssistantSectionType = Literal[
     "source_list",
     "warning_block",
     "next_actions",
+    "clarification",
 ]
 AssistantFollowupAction = Literal["query", "open"]
 AssistantSourceRole = Literal["primary", "supporting", "warning"]
@@ -154,6 +158,7 @@ class AssistantTokenUsage(ORMModel):
 class AssistantResponse(ORMModel):
     answer_id: str = Field(alias="answerId")
     session_id: str | None = Field(default=None, alias="sessionId")
+    response_type: AssistantResponseType = Field(default="answer", alias="type")
     intent: AssistantIntent
     status: AssistantResponseStatus
     confidence: float
@@ -169,6 +174,10 @@ class AssistantResponse(ORMModel):
     provider: str
     token_usage: AssistantTokenUsage = Field(default_factory=AssistantTokenUsage, alias="tokenUsage")
     context_used: AssistantPinnedContext = Field(alias="contextUsed")
+    missing_fields: list[dict[str, Any]] = Field(default_factory=list, alias="missingFields")
+    suggested_chips: list[str] = Field(default_factory=list, alias="suggestedChips")
+    pending_intent: AssistantIntent | None = Field(default=None, alias="pendingIntent")
+    trace_metadata: dict[str, Any] = Field(default_factory=dict, alias="traceMetadata")
 
 
 class AssistantMessageResponse(ORMModel):

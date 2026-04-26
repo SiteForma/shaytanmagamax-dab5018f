@@ -33,6 +33,7 @@ import type {
   AssistantSection,
   AssistantSession,
 } from "@/types";
+import type { AssistantStreamEvent } from "@/services/assistant.service";
 import {
   useAssistantContextOptionsQuery,
   useAssistantMessagesQuery,
@@ -140,46 +141,49 @@ function formatSessionUsage(session: AssistantSession) {
   return `${session.messageCount} сообщений: ${formatSessionCostRub(session.estimatedCostRub ?? session.tokenUsage?.estimatedCostRub ?? 0)}`;
 }
 
+function createLocalAssistantMessage(
+  id: string,
+  sessionId: string,
+  text: string,
+  context: AssistantPinnedContext,
+  status = "streaming",
+): AssistantMessage {
+  return {
+    id,
+    sessionId,
+    role: "assistant",
+    text,
+    createdAt: new Date().toISOString(),
+    status,
+    context,
+    response: null,
+  };
+}
+
+function createLocalUserMessage(
+  id: string,
+  sessionId: string,
+  text: string,
+  context: AssistantPinnedContext,
+): AssistantMessage {
+  return {
+    id,
+    sessionId,
+    role: "user",
+    text,
+    createdAt: new Date().toISOString(),
+    status: "completed",
+    context,
+    response: null,
+  };
+}
+
 function formatToolArgument(value: unknown) {
   if (value === null || value === undefined) return "—";
   if (Array.isArray(value)) return value.length ? value.join(", ") : "—";
   if (typeof value === "boolean") return value ? "Да" : "Нет";
   if (typeof value === "object") return JSON.stringify(value);
   return String(value);
-}
-
-function responseTextLength(response: AssistantResponse) {
-  return response.summary.length;
-}
-
-function createTextRevealer(visibleChars: number) {
-  let remaining = visibleChars;
-  return (value: string | null | undefined) => {
-    if (value === null || value === undefined || value.length === 0) return value ?? null;
-    if (remaining <= 0) return "";
-    if (remaining >= value.length) {
-      remaining -= value.length;
-      return value;
-    }
-    const visible = value.slice(0, remaining);
-    remaining = 0;
-    return visible;
-  };
-}
-
-function revealResponseText(response: AssistantResponse, visibleChars: number): AssistantResponse {
-  const reveal = createTextRevealer(visibleChars);
-  return {
-    ...response,
-    title: response.title,
-    summary: reveal(response.summary) ?? "",
-    sections: response.sections.map((section) => ({
-      ...section,
-      title: reveal(section.title) ?? "",
-      body: reveal(section.body) ?? null,
-      items: section.items.map((item) => reveal(item) ?? "").filter(Boolean),
-    })),
-  };
 }
 
 function MagamaxAssistantIcon({ className }: { className?: string }) {
@@ -206,44 +210,6 @@ function MagamaxGeneratingIndicator() {
       <MagamaxAssistantIcon className="relative h-5 w-5 animate-spin [animation-duration:3.2s] [animation-timing-function:cubic-bezier(0.55,0,0.25,1)] motion-reduce:animate-none" />
     </div>
   );
-}
-
-function useTypewriterCursor(totalChars: number, active: boolean, onDone?: () => void) {
-  const [visibleChars, setVisibleChars] = useState(active ? 0 : totalChars);
-  const onDoneRef = useRef(onDone);
-
-  useEffect(() => {
-    onDoneRef.current = onDone;
-  }, [onDone]);
-
-  useEffect(() => {
-    if (!active) {
-      setVisibleChars(totalChars);
-      return;
-    }
-
-    setVisibleChars(0);
-    if (totalChars <= 0) {
-      onDoneRef.current?.();
-      return;
-    }
-
-    const step = Math.max(2, Math.ceil(totalChars / 180));
-    const intervalId = window.setInterval(() => {
-      setVisibleChars((current) => {
-        const next = Math.min(totalChars, current + step);
-        if (next >= totalChars) {
-          window.clearInterval(intervalId);
-          window.setTimeout(() => onDoneRef.current?.(), 120);
-        }
-        return next;
-      });
-    }, 20);
-
-    return () => window.clearInterval(intervalId);
-  }, [active, totalChars]);
-
-  return active ? visibleChars : totalChars;
 }
 
 function ResponseSection({ section }: { section: AssistantSection }) {
@@ -498,30 +464,141 @@ function AssistantDetailsDialog({
   );
 }
 
-function AssistantResponseCard({
+function ResponseSourcesInline({ response }: { response: AssistantResponse }) {
+  if (!response.sourceRefs.length) return null;
+
+  const visibleSources = response.sourceRefs.slice(0, 3);
+  const hiddenCount = Math.max(response.sourceRefs.length - visibleSources.length, 0);
+
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-xs text-ink-muted">
+      <span className="uppercase tracking-[0.12em]">Источники</span>
+      {visibleSources.map((source) => {
+        const content = (
+          <>
+            <FileText className="h-3.5 w-3.5 text-success" />
+            <span>{source.sourceLabel}</span>
+          </>
+        );
+
+        return source.route ? (
+          <Link
+            key={`${source.sourceType}-${source.entityId ?? source.sourceLabel}`}
+            to={source.route}
+            className="inline-flex max-w-[260px] items-center gap-1.5 truncate rounded-full border border-success/20 bg-success/10 px-2.5 py-1 text-success/90 transition-colors hover:border-success/40 hover:bg-success/15"
+          >
+            {content}
+          </Link>
+        ) : (
+          <span
+            key={`${source.sourceType}-${source.entityId ?? source.sourceLabel}`}
+            className="inline-flex max-w-[260px] items-center gap-1.5 truncate rounded-full border border-success/20 bg-success/10 px-2.5 py-1 text-success/90"
+          >
+            {content}
+          </span>
+        );
+      })}
+      {hiddenCount ? (
+        <span className="rounded-full border border-line-subtle bg-surface-muted/40 px-2.5 py-1">
+          +{hiddenCount}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+function formatAssistantFieldName(name: string) {
+  const labels: Record<string, string> = {
+    client_id: "клиент",
+    sku_id: "SKU",
+    sku_ids: "SKU",
+    date_from: "начало периода",
+    date_to: "конец периода",
+    metric: "метрика",
+    current_period: "текущий период",
+    previous_period: "период сравнения",
+  };
+  return labels[name] ?? name;
+}
+
+function formatAssistantIntent(intent?: string | null) {
+  const labels: Record<string, string> = {
+    reserve_calculation: "расчёт резерва",
+    reserve_explanation: "объяснение резерва",
+    stock_risk_summary: "риски склада",
+    management_report_summary: "управленческий отчёт",
+    sales_summary: "продажи",
+    period_comparison: "сравнение периодов",
+  };
+  return intent ? labels[intent] ?? intent : null;
+}
+
+function ClarificationPanel({
   response,
   onFollowup,
-  animate = false,
-  onTypingDone,
-  onTypingProgress,
 }: {
   response: AssistantResponse;
   onFollowup: (prompt: string) => void;
-  animate?: boolean;
-  onTypingDone?: () => void;
-  onTypingProgress?: () => void;
 }) {
-  const totalChars = useMemo(() => responseTextLength(response), [response]);
-  const visibleChars = useTypewriterCursor(totalChars, animate, onTypingDone);
-  const isTyping = animate && visibleChars < totalChars;
-  const renderedResponse = animate ? revealResponseText(response, visibleChars) : response;
-  const [detailsOpen, setDetailsOpen] = useState(false);
+  const missingFields = response.missingFields ?? [];
+  const chips = response.suggestedChips ?? [];
+  const isClarification = response.type === "clarification" || response.status === "needs_clarification";
+  if (!isClarification && !missingFields.length && !chips.length) return null;
 
-  useEffect(() => {
-    if (animate) {
-      onTypingProgress?.();
-    }
-  }, [animate, onTypingProgress, visibleChars]);
+  return (
+    <div className="rounded-2xl border border-warning/25 bg-warning/10 px-4 py-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-warning">
+          <Info className="h-3.5 w-3.5" />
+          Нужно уточнение
+        </div>
+        {response.pendingIntent ? (
+          <span className="rounded-full border border-warning/20 bg-warning/10 px-2.5 py-1 text-xs text-warning">
+            {formatAssistantIntent(response.pendingIntent)}
+          </span>
+        ) : null}
+      </div>
+
+      {missingFields.length ? (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {missingFields.map((field) => (
+            <span
+              key={field.name}
+              className="rounded-full border border-line-subtle bg-surface-muted/45 px-3 py-1.5 text-xs text-ink-secondary"
+              title={field.question ?? undefined}
+            >
+              Не хватает: {field.label ?? formatAssistantFieldName(field.name)}
+            </span>
+          ))}
+        </div>
+      ) : null}
+
+      {chips.length ? (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {chips.map((chip) => (
+            <button
+              key={chip}
+              type="button"
+              onClick={() => onFollowup(chip)}
+              className="rounded-full border border-brand/25 bg-brand/10 px-3 py-1.5 text-xs text-brand transition-colors hover:border-brand/45 hover:bg-brand/15"
+            >
+              {chip}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function AssistantResponseCard({
+  response,
+  onFollowup,
+}: {
+  response: AssistantResponse;
+  onFollowup: (prompt: string) => void;
+}) {
+  const [detailsOpen, setDetailsOpen] = useState(false);
 
   return (
     <article className="group flex gap-4 py-7">
@@ -533,36 +610,28 @@ function AssistantResponseCard({
           <div className="min-w-0 flex-1">
             <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-muted">MAGAMAX AI</div>
             <p className="mt-1 max-w-3xl text-sm leading-relaxed text-ink-secondary">
-              {renderedResponse.summary}
+              {response.summary}
             </p>
           </div>
-          {!isTyping ? (
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-9 shrink-0 rounded-full border-line-subtle bg-surface-muted/40 text-xs text-ink-secondary hover:bg-surface-hover hover:text-ink"
-              onClick={() => setDetailsOpen(true)}
-            >
-              <Info className="mr-1.5 h-3.5 w-3.5 text-brand" />
-              Подробнее
-            </Button>
-          ) : null}
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-9 shrink-0 rounded-full border-line-subtle bg-surface-muted/40 text-xs text-ink-secondary hover:bg-surface-hover hover:text-ink"
+            onClick={() => setDetailsOpen(true)}
+          >
+            <Info className="mr-1.5 h-3.5 w-3.5 text-success" />
+            Подробнее
+          </Button>
         </div>
 
-        {isTyping ? (
-          <div className="flex items-center gap-2 text-sm text-ink-muted">
-            <span className="h-4 w-2 animate-pulse rounded-sm bg-brand/80" />
-            <span>печатает…</span>
-          </div>
-        ) : null}
-        {!isTyping ? (
-          <AssistantDetailsDialog
-            response={response}
-            open={detailsOpen}
-            onOpenChange={setDetailsOpen}
-            onFollowup={onFollowup}
-          />
-        ) : null}
+        <ClarificationPanel response={response} onFollowup={onFollowup} />
+        <ResponseSourcesInline response={response} />
+        <AssistantDetailsDialog
+          response={response}
+          open={detailsOpen}
+          onOpenChange={setDetailsOpen}
+          onFollowup={onFollowup}
+        />
       </div>
     </article>
   );
@@ -755,7 +824,7 @@ export default function AiConsolePage() {
   const [selectedCategoryId, setSelectedCategoryId] = useState("");
   const [selectedRunId, setSelectedRunId] = useState("");
   const [isContextOpen, setIsContextOpen] = useState(false);
-  const [typingMessageId, setTypingMessageId] = useState<string | null>(null);
+  const [streamingMessages, setStreamingMessages] = useState<AssistantMessage[]>([]);
   const [deletedSessionIds, setDeletedSessionIds] = useState<Set<string>>(() => new Set());
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
@@ -778,7 +847,15 @@ export default function AiConsolePage() {
     () => (sessionsQuery.data ?? []).filter((item) => !deletedSessionIds.has(item.id)),
     [deletedSessionIds, sessionsQuery.data],
   );
-  const messages = useMemo(() => messagesQuery.data ?? [], [messagesQuery.data]);
+  const serverMessages = useMemo(() => messagesQuery.data ?? [], [messagesQuery.data]);
+  const messages = useMemo(() => {
+    const serverIds = new Set(serverMessages.map((message) => message.id));
+    return [
+      ...serverMessages,
+      ...streamingMessages.filter((message) => message.sessionId === sessionId && !serverIds.has(message.id)),
+    ];
+  }, [serverMessages, sessionId, streamingMessages]);
+  const lastMessage = messages[messages.length - 1] ?? null;
   const options = contextOptionsQuery.data;
 
   const activeSession = useMemo(
@@ -806,7 +883,24 @@ export default function AiConsolePage() {
 
   useEffect(() => {
     scrollChatToBottom(messages.length > 1 ? "smooth" : "auto");
-  }, [isPending, messages.length, messages[messages.length - 1]?.id, scrollChatToBottom, typingMessageId]);
+  }, [
+    isPending,
+    messages.length,
+    lastMessage?.id,
+    lastMessage?.text,
+    scrollChatToBottom,
+  ]);
+
+  useEffect(() => {
+    if (!streamingMessages.length) return;
+    const serverIds = new Set(serverMessages.map((message) => message.id));
+    setStreamingMessages((current) => {
+      const next = current.filter(
+        (message) => message.sessionId === sessionId && !serverIds.has(message.id),
+      );
+      return next.length === current.length ? current : next;
+    });
+  }, [serverMessages, sessionId, streamingMessages.length]);
 
   useEffect(() => {
     if (activeSession) {
@@ -857,20 +951,91 @@ export default function AiConsolePage() {
     const nextText = text.trim();
     setDraft("");
     const ensuredSessionId = await ensureSessionId();
-    const result = await messageMutation.mutateAsync({
-      sessionId: ensuredSessionId,
-      payload: {
-        text: nextText,
-        context: buildContext(
-          selectedClientId,
-          selectedSkuId,
-          selectedFileId,
-          selectedCategoryId,
-          selectedRunId,
+    const context = buildContext(
+      selectedClientId,
+      selectedSkuId,
+      selectedFileId,
+      selectedCategoryId,
+      selectedRunId,
+    );
+    const turnId = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    const localUserId = `local_user_${turnId}`;
+    const localAssistantId = `local_assistant_${turnId}`;
+    setStreamingMessages((current) => [
+      ...current.filter((message) => message.sessionId === ensuredSessionId),
+      createLocalUserMessage(localUserId, ensuredSessionId, nextText, context),
+    ]);
+
+    const applyStreamEvent = (event: AssistantStreamEvent) => {
+      if (event.type === "thinking" && event.userMessage) {
+        const userMessage = event.userMessage;
+        setStreamingMessages((current) =>
+          current.map((message) => (message.id === localUserId ? userMessage : message)),
+        );
+        return;
+      }
+
+      if (event.type === "answer_delta") {
+        setStreamingMessages((current) => {
+          const existingIndex = current.findIndex(
+            (message) => message.id === localAssistantId || message.id === event.messageId,
+          );
+          if (existingIndex === -1) {
+            return [
+              ...current,
+              createLocalAssistantMessage(localAssistantId, ensuredSessionId, event.delta, context),
+            ];
+          }
+          const next = [...current];
+          const existing = next[existingIndex];
+          next[existingIndex] = {
+            ...existing,
+            text: `${existing.text}${event.delta}`,
+            status: "streaming",
+          };
+          return next;
+        });
+        return;
+      }
+
+      if (event.type === "done") {
+        setStreamingMessages((current) => [
+          ...current.filter(
+            (message) =>
+              ![
+                localUserId,
+                localAssistantId,
+                event.result.userMessage.id,
+                event.result.assistantMessage.id,
+              ].includes(message.id),
+          ),
+          event.result.userMessage,
+          event.result.assistantMessage,
+        ]);
+      }
+    };
+
+    try {
+      await messageMutation.mutateAsync({
+        sessionId: ensuredSessionId,
+        payload: {
+          text: nextText,
+          context,
+        },
+        onEvent: applyStreamEvent,
+      });
+    } catch {
+      setStreamingMessages((current) => [
+        ...current.filter((message) => message.id !== localAssistantId),
+        createLocalAssistantMessage(
+          localAssistantId,
+          ensuredSessionId,
+          "Не удалось получить ответ. Повторите запрос.",
+          context,
+          "failed",
         ),
-      },
-    });
-    setTypingMessageId(result.assistantMessage?.id ?? null);
+      ]);
+    }
   }
 
   async function renameSession(nextSessionId: string, title: string) {
@@ -931,6 +1096,13 @@ export default function AiConsolePage() {
     selectedCategoryId,
     selectedRunId,
   ].filter(Boolean).length;
+  const hasStreamingAssistantMessage = streamingMessages.some(
+    (message) =>
+      message.sessionId === sessionId &&
+      message.role === "assistant" &&
+      message.status === "streaming" &&
+      message.text.trim().length > 0,
+  );
   const contextControls = (
     <div className="space-y-3">
       {contextOptionsQuery.error ? (
@@ -1119,9 +1291,6 @@ export default function AiConsolePage() {
                       key={message.id}
                       response={message.response}
                       onFollowup={(prompt) => void send(prompt)}
-                      animate={message.id === typingMessageId}
-                      onTypingProgress={() => scrollChatToBottom("smooth")}
-                      onTypingDone={() => setTypingMessageId(null)}
                     />
                   ) : (
                     <article key={message.id} className="flex gap-4 py-7 text-sm text-ink-secondary">
@@ -1134,7 +1303,7 @@ export default function AiConsolePage() {
                 )}
               </div>
 
-              {isGeneratingAnswer ? (
+              {isGeneratingAnswer && !hasStreamingAssistantMessage ? (
                 <div className="flex gap-4 py-7" role="status" aria-live="polite">
                   <MagamaxGeneratingIndicator />
                   <div className="rounded-2xl border border-line-subtle bg-surface-muted/35 px-5 py-3 text-sm text-ink-muted shadow-[0_18px_55px_rgba(0,0,0,0.18)]">

@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import json
+from collections.abc import Iterator
+
 from fastapi import APIRouter, Depends, Response, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from apps.api.app.api.dependencies import get_settings_dependency, require_capability
@@ -32,11 +36,20 @@ from apps.api.app.modules.assistant.service import (
     list_assistant_messages,
     list_assistant_sessions,
     post_assistant_message,
+    stream_assistant_message_events,
     update_assistant_session,
 )
 from apps.api.app.modules.audit.service import record_audit_event
 
 router = APIRouter(prefix="/assistant", tags=["assistant"])
+
+
+def _encode_sse_event(event: dict[str, object]) -> bytes:
+    event_type = str(event.get("type") or "message")
+    payload = dict(event)
+    payload["type"] = event_type
+    data = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    return f"event: {event_type}\ndata: {data}\n\n".encode("utf-8")
 
 
 @router.post("/sessions", response_model=AssistantSessionSummary)
@@ -153,6 +166,50 @@ def post_message_route(
     )
     db.commit()
     return result
+
+
+@router.post("/sessions/{session_id}/messages/stream")
+def stream_message_route(
+    session_id: str,
+    payload: AssistantMessageCreateRequest,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings_dependency),
+    current_user: User = Depends(require_capability("assistant", "query")),
+) -> StreamingResponse:
+    def event_stream() -> Iterator[bytes]:
+        for event in stream_assistant_message_events(
+            db,
+            settings,
+            session_id=session_id,
+            payload=payload,
+            current_user=current_user,
+        ):
+            if event.get("type") == "done":
+                result = event.get("result")
+                response = result.get("response") if isinstance(result, dict) else {}
+                record_audit_event(
+                    db,
+                    actor_user_id=current_user.id,
+                    action="assistant.message_streamed",
+                    target_type="assistant_session",
+                    target_id=session_id,
+                    context={
+                        "intent": response.get("intent") if isinstance(response, dict) else None,
+                        "status": response.get("status") if isinstance(response, dict) else None,
+                    },
+                )
+                db.commit()
+            yield _encode_sse_event(event)
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.post("/query", response_model=AssistantResponse)

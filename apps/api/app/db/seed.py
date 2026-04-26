@@ -108,12 +108,13 @@ def seed_reference_data(db: Session, settings: Settings) -> None:
         "uploads",
         "mapping",
         "quality",
+        "reports",
         "assistant",
     ):
         ensure_policy("viewer", resource, "read")
     ensure_policy("viewer", "assistant", "query")
 
-    for resource in ("dashboard", "catalog", "clients", "stock", "inbound", "sales", "quality"):
+    for resource in ("dashboard", "catalog", "clients", "stock", "inbound", "sales", "quality", "reports"):
         ensure_policy("analyst", resource, "read")
     ensure_policy("analyst", "reserve", "read")
     ensure_policy("analyst", "reserve", "run")
@@ -126,7 +127,7 @@ def seed_reference_data(db: Session, settings: Settings) -> None:
     ensure_policy("analyst", "exports", "generate")
     ensure_policy("analyst", "exports", "download")
 
-    for resource in ("dashboard", "catalog", "clients", "stock", "inbound", "quality"):
+    for resource in ("dashboard", "catalog", "clients", "stock", "inbound", "quality", "reports"):
         ensure_policy("operator", resource, "read")
     ensure_policy("operator", "uploads", "read")
     ensure_policy("operator", "uploads", "write")

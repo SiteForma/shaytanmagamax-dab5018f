@@ -6,6 +6,7 @@ from typing import Any, Protocol
 
 import httpx
 
+from apps.api.app.core.errors import DomainError
 from apps.api.app.core.config import Settings
 from apps.api.app.modules.assistant.domain import (
     AssistantAnswerDraft,
@@ -13,6 +14,7 @@ from apps.api.app.modules.assistant.domain import (
     AssistantTokenUsageData,
     AssistantWarningData,
 )
+from apps.api.app.modules.assistant.registry import get_default_tool_registry
 from apps.api.app.modules.assistant.schemas import AssistantIntent
 
 
@@ -31,21 +33,19 @@ PLANNABLE_INTENTS: set[str] = {
     "upload_status_summary",
     "quality_issue_summary",
     "management_report_summary",
+    "sales_summary",
+    "period_comparison",
     "free_chat",
     "unsupported_or_ambiguous",
 }
 
-PLANNABLE_TOOLS: set[str] = {
-    "calculate_reserve",
-    "get_reserve_explanation",
+PLANNABLE_TOOLS: set[str] = set(get_default_tool_registry().tool_names) | {
     "get_sku_summary",
     "get_client_summary",
     "get_inbound_impact",
-    "get_stock_coverage",
     "get_upload_status",
     "get_quality_issues",
     "get_dashboard_summary",
-    "get_management_report",
 }
 
 
@@ -108,6 +108,7 @@ def _draft_payload(draft: AssistantAnswerDraft) -> dict[str, Any]:
     return {
         "intent": draft.intent,
         "status": draft.status,
+        "type": draft.response_type,
         "confidence": draft.confidence,
         "title": draft.title,
         "summary": draft.summary,
@@ -129,6 +130,10 @@ def _draft_payload(draft: AssistantAnswerDraft) -> dict[str, Any]:
             for tool in draft.tool_calls
         ],
         "userText": draft.user_text,
+        "missingFields": draft.missing_fields,
+        "suggestedChips": draft.suggested_chips,
+        "pendingIntent": draft.pending_intent,
+        "traceMetadata": draft.trace_metadata,
     }
 
 
@@ -193,8 +198,9 @@ class OpenAICompatibleAssistantProvider:
                 "Ты доменно-ограниченный чат-ассистент MAGAMAX внутри премиального internal analytics продукта. "
                 "Отвечай только по работе с MAGAMAX, загруженным данным, ingestion, mapping, quality, "
                 "резервам, SKU, клиентам DIY, складу, входящим поставкам, dashboard и расчётам по этим данным. "
-                "Если сообщение выходит за этот контур, верни жёсткий отказ: "
-                "«Шайтан-машина отвечает только на вопросы, сопряжённые с рабочими данными MAGAMAX». "
+                "Если сообщение выходит за этот контур, отвечай коротко и по-человечески: "
+                "ты можешь консультировать только по работе MAGAMAX и данным сервиса. "
+                "Если вопрос похож на рабочий, но непонятен, задай один уточняющий вопрос. "
                 "Если пользователь просит операционные факты, числа или выводы, не выдумывай их: "
                 "предложи сформулировать вопрос так, чтобы включились реальные инструменты продукта. "
                 "Можно использовать только переданный JSON-контекст и закреплённый контекст сессии. "
@@ -251,14 +257,15 @@ class OpenAICompatibleAssistantProvider:
             "склада, поставок, резервов, качества данных или dashboard — выбери ближайший доменный intent. "
             "Если вопрос явно про управленческий отчёт, 2025, товарные группы, прибыль, рентабельность "
             "или выручку, чаще всего нужен intent management_report_summary и tool get_management_report. "
-            "Выбери ровно один intent из allowedIntents и инструменты только из allowedTools. "
-            "При необходимости перепиши toolQuestion так, чтобы backend-роутер извлёк параметры "
-            "или follow-up использовал предыдущий контекст чата. "
+            "Выбери ровно один intent из allowedIntents и один toolName только из allowedTools. "
+            "Верни структурные params для tool по явным данным вопроса и истории. "
+            "Не возвращай SQL, raw filters или параметры вне контракта tool. "
+            "Если параметров не хватает, заполни missingFields и followupQuestion. "
             "Если пользователь пишет «подробнее», «дай развернутые данные», «покажи детали», "
             "и предыдущее сообщение ассистента было доменным ответом, наследуй предыдущий intent. "
             "Если вопрос вне рабочего контура MAGAMAX, выбери unsupported_or_ambiguous и пустой список toolNames. "
-            "Верни только JSON: {intent, confidence, toolQuestion, toolNames, rationale}. "
-            "toolQuestion должен содержать исходный смысл и нужный предыдущий контекст, но не новые факты."
+            "Верни только JSON: {intent, toolName, params, missingFields, followupQuestion, confidence, rationale}. "
+            "Для совместимости можно добавить toolQuestion/toolNames, но основной контракт — structured params."
         )
         return {
             "model": self._settings.assistant_openai_model,
@@ -323,13 +330,38 @@ class OpenAICompatibleAssistantProvider:
         if intent not in PLANNABLE_INTENTS:
             raise AssistantProviderError("Провайдер вернул неизвестный intent.")
         tool_question = str(structured.get("toolQuestion") or "").strip() or None
+        followup_question = str(structured.get("followupQuestion") or "").strip() or None
+        raw_params = structured.get("params")
+        params = raw_params if isinstance(raw_params, dict) else {}
+        if any("sql" in key.lower() for key in params):
+            raise AssistantProviderError("Planner вернул SQL-параметр, это запрещено.")
+        tool_name = str(structured.get("toolName") or "").strip() or None
         raw_tools = structured.get("toolNames")
         tool_names: list[str] = []
+        if tool_name:
+            if tool_name not in PLANNABLE_TOOLS:
+                raise AssistantProviderError("Провайдер вернул неизвестный toolName.")
+            tool_names.append(tool_name)
         if isinstance(raw_tools, list):
             for item in raw_tools:
-                tool_name = str(item or "").strip()
-                if tool_name in PLANNABLE_TOOLS and tool_name not in tool_names:
-                    tool_names.append(tool_name)
+                item_tool_name = str(item or "").strip()
+                if item_tool_name not in PLANNABLE_TOOLS:
+                    raise AssistantProviderError("Провайдер вернул неизвестный toolName.")
+                if item_tool_name not in tool_names:
+                    tool_names.append(item_tool_name)
+        if tool_names and params:
+            try:
+                get_default_tool_registry().validate(tool_names[0], params)
+            except DomainError as exc:
+                raise AssistantProviderError(exc.message) from exc
+        raw_missing_fields = structured.get("missingFields")
+        missing_fields: list[dict[str, Any]] = []
+        if isinstance(raw_missing_fields, list):
+            for item in raw_missing_fields:
+                if isinstance(item, str):
+                    missing_fields.append({"name": item})
+                elif isinstance(item, dict):
+                    missing_fields.append(item)
         rationale = str(structured.get("rationale") or "").strip() or None
         try:
             confidence = float(structured.get("confidence") or 0)
@@ -338,7 +370,11 @@ class OpenAICompatibleAssistantProvider:
         return AssistantRoutePlan(
             intent=intent,  # type: ignore[arg-type]
             tool_question=tool_question,
+            tool_name=tool_names[0] if tool_names else None,
             tool_names=tool_names,
+            params=params,
+            missing_fields=missing_fields,
+            followup_question=followup_question,
             confidence=max(min(confidence, 1.0), 0.0),
             planner=self.name,
             rationale=rationale,

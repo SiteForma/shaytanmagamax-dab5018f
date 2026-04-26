@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 from collections import OrderedDict
+from datetime import date
 
+from sqlalchemy import select
+from sqlalchemy.orm import joinedload
 from sqlalchemy.orm import Session
 
 from apps.api.app.common.utils import generate_id, utc_now
 from apps.api.app.core.config import Settings
+from apps.api.app.core.errors import DomainError
+from apps.api.app.db.models import Category, Client, Sku, User, UserRole
 from apps.api.app.modules.assistant.context import build_context_bundle
 from apps.api.app.modules.assistant.domain import (
     AssistantAnswerDraft,
@@ -19,6 +24,8 @@ from apps.api.app.modules.assistant.providers import (
     finalize_with_provider,
     plan_route_with_provider,
 )
+from apps.api.app.modules.assistant.permissions import require_assistant_tool_capabilities
+from apps.api.app.modules.assistant.registry import AssistantToolSpec, get_default_tool_registry
 from apps.api.app.modules.assistant.routing import route_question
 from apps.api.app.modules.assistant.schemas import (
     AssistantAnswerSection,
@@ -31,17 +38,11 @@ from apps.api.app.modules.assistant.schemas import (
     AssistantToolCall,
     AssistantWarning,
 )
-from apps.api.app.modules.assistant.tools import (
-    tool_calculate_reserve,
-    tool_get_client_summary,
-    tool_get_dashboard_summary,
-    tool_get_inbound_impact,
-    tool_get_management_report,
-    tool_get_quality_issues,
-    tool_get_sku_summary,
-    tool_get_stock_risk,
-    tool_get_upload_status,
-    tool_reserve_explanation,
+from apps.api.app.modules.assistant.state import (
+    AssistantMissingField,
+    derive_state_from_history,
+    merge_state,
+    resolve_followup_from_state,
 )
 
 
@@ -143,6 +144,226 @@ def _context_schema(context: AssistantResolvedContext) -> AssistantPinnedContext
         selectedReserveRunId=context.selected_reserve_run_id,
         selectedCategoryId=context.selected_category_id,
     )
+
+
+def _user_for_tool_check(db: Session, current_user: User | None, created_by_id: str | None) -> User | None:
+    if current_user is not None:
+        return current_user
+    if not created_by_id:
+        return None
+    return db.scalar(
+        select(User)
+        .options(joinedload(User.roles).joinedload(UserRole.role))
+        .where(User.id == created_by_id)
+    )
+
+
+def _period_from_question(question: str) -> dict[str, str]:
+    q = question.lower()
+    if "2025" in q:
+        return {"date_from": "2025-01-01", "date_to": "2025-12-01"}
+    if "2024" in q:
+        return {"date_from": "2024-01-01", "date_to": "2024-12-01"}
+    return {}
+
+
+def _previous_month(value: str) -> str | None:
+    try:
+        current = date.fromisoformat(value if len(value) > 7 else f"{value}-01")
+    except ValueError:
+        return None
+    if current.month == 1:
+        return f"{current.year - 1}-12"
+    return f"{current.year}-{current.month - 1:02d}"
+
+
+def _params_from_route(
+    *,
+    question: str,
+    bundle: AssistantContextBundle,
+    plan_params: dict[str, object],
+    state_params: dict[str, object],
+) -> dict[str, object]:
+    params: dict[str, object] = {}
+    params.update(state_params)
+    params.update(plan_params)
+    if bundle.route.extracted_client_id:
+        params["client_id"] = bundle.route.extracted_client_id
+    elif bundle.context.selected_client_id:
+        params.setdefault("client_id", bundle.context.selected_client_id)
+    if bundle.route.extracted_sku_ids:
+        params["sku_ids"] = bundle.route.extracted_sku_ids
+        params.setdefault("sku_id", bundle.route.extracted_sku_ids[0])
+    elif bundle.context.selected_sku_id:
+        params.setdefault("sku_id", bundle.context.selected_sku_id)
+    if bundle.route.extracted_category_id:
+        params["category_id"] = bundle.route.extracted_category_id
+    elif bundle.context.selected_category_id:
+        params.setdefault("category_id", bundle.context.selected_category_id)
+    if bundle.context.selected_reserve_run_id:
+        params.setdefault("reserve_run_id", bundle.context.selected_reserve_run_id)
+    if bundle.route.extracted_client_name:
+        params.setdefault("client_name", bundle.route.extracted_client_name)
+    if bundle.route.reserve_months is not None:
+        params.setdefault("reserve_months", bundle.route.reserve_months)
+    if bundle.route.safety_factor is not None:
+        params.setdefault("safety_factor", bundle.route.safety_factor)
+    if bundle.route.intent == "management_report_summary":
+        params.setdefault("question", question)
+    if bundle.route.intent == "sales_summary":
+        params.update({key: value for key, value in _period_from_question(question).items() if key not in params})
+    if bundle.route.intent == "period_comparison":
+        q = question.lower()
+        if any(token in q for token in ("продаж", "sales", "выруч", "revenue")):
+            params.setdefault("metric", "revenue" if any(token in q for token in ("выруч", "revenue")) else "quantity")
+        current_period = str(params.get("current_period") or "")
+        if "прошл" in q and current_period and not params.get("previous_period"):
+            previous = _previous_month(current_period)
+            if previous:
+                params["previous_period"] = previous
+    return {key: value for key, value in params.items() if value not in (None, "", [])}
+
+
+def _clarification_chips(missing_fields: list[AssistantMissingField]) -> list[str]:
+    chips: list[str] = []
+    for field in missing_fields:
+        if field.name == "client_id":
+            chips.extend(["Леман Про", "OBI Россия", "Леруа Мерлен"])
+        elif field.name == "date_from":
+            chips.extend(["2025", "последние 6 месяцев"])
+        elif field.name == "metric":
+            chips.extend(["продажи", "выручка", "резерв"])
+    return list(dict.fromkeys(chips))[:6]
+
+
+def _compose_clarification(
+    *,
+    intent: str,
+    missing_fields: list[AssistantMissingField],
+    bundle: AssistantContextBundle,
+) -> AssistantAnswerDraft:
+    question = missing_fields[0].question if missing_fields else "Уточните параметры запроса."
+    return AssistantAnswerDraft(
+        intent=intent,  # type: ignore[arg-type]
+        status="needs_clarification",
+        response_type="clarification",
+        confidence=0.62,
+        title="Нужно уточнение",
+        summary=question,
+        sections=[
+            _section(
+                section_type="clarification",
+                title="Уточнение",
+                body=question,
+                items=[field.question for field in missing_fields],
+            )
+        ],
+        source_refs=[],
+        tool_calls=[],
+        followups=[
+            {
+                "id": f"chip_{index}",
+                "label": chip,
+                "prompt": chip,
+                "action": "query",
+            }
+            for index, chip in enumerate(_clarification_chips(missing_fields))
+        ],
+        warnings=[],
+        context_used=bundle.context,
+        missing_fields=[field.to_payload() for field in missing_fields],
+        suggested_chips=_clarification_chips(missing_fields),
+        pending_intent=intent,
+    )
+
+
+def _trace_metadata(
+    *,
+    resolved_intent: str,
+    resolved_tool: str | None,
+    missing_fields: list[AssistantMissingField],
+    clarification_reason: str | None = None,
+    permission_denied_tool: str | None = None,
+    source_refs_count: int = 0,
+) -> dict[str, object]:
+    return {
+        "resolved_intent": resolved_intent,
+        "resolved_tool": resolved_tool,
+        "missing_fields": [field.name for field in missing_fields],
+        "clarification_reason": clarification_reason,
+        "permission_denied_tool": permission_denied_tool,
+        "source_refs_count": source_refs_count,
+    }
+
+
+def _validate_entity_params(db: Session, params: dict[str, object]) -> None:
+    client_id = str(params.get("client_id") or "").strip()
+    if client_id and db.get(Client, client_id) is None:
+        raise DomainError(
+            code="assistant_entity_not_available",
+            message="Запрошенный клиент недоступен или не найден.",
+            details={"entity": "client", "param": "client_id"},
+            status_code=403,
+        )
+
+    sku_id = str(params.get("sku_id") or "").strip()
+    if sku_id and db.get(Sku, sku_id) is None:
+        raise DomainError(
+            code="assistant_entity_not_available",
+            message="Запрошенный SKU недоступен или не найден.",
+            details={"entity": "sku", "param": "sku_id"},
+            status_code=403,
+        )
+
+    sku_ids = params.get("sku_ids")
+    if isinstance(sku_ids, list):
+        for index, item in enumerate(sku_ids):
+            item_id = str(item or "").strip()
+            if item_id and db.get(Sku, item_id) is None:
+                raise DomainError(
+                    code="assistant_entity_not_available",
+                    message="Один из запрошенных SKU недоступен или не найден.",
+                    details={"entity": "sku", "param": f"sku_ids[{index}]"},
+                    status_code=403,
+                )
+
+    category_id = str(params.get("category_id") or "").strip()
+    if category_id and db.get(Category, category_id) is None:
+        raise DomainError(
+            code="assistant_entity_not_available",
+            message="Запрошенная категория недоступна или не найдена.",
+            details={"entity": "category", "param": "category_id"},
+            status_code=403,
+        )
+
+
+def _dispatch_tool(
+    db: Session,
+    *,
+    spec: AssistantToolSpec,
+    bundle: AssistantContextBundle,
+    params: dict[str, object],
+    created_by_id: str | None,
+    current_user: User | None,
+) -> AssistantToolExecution:
+    try:
+        require_assistant_tool_capabilities(
+            _user_for_tool_check(db, current_user, created_by_id),
+            spec,
+        )
+    except Exception as exc:
+        if getattr(exc, "code", None) == "permission_denied":
+            details = dict(getattr(exc, "details", None) or {})
+            details.setdefault("resolved_intent", bundle.route.intent)
+            details.setdefault("resolved_tool", spec.name)
+            details.setdefault("permission_denied_tool", spec.name)
+            exc.details = details
+        raise
+    _validate_entity_params(db, params)
+    execution = spec.handler(db, bundle, params, created_by_id)
+    if spec.name in {"get_reserve", "explain_reserve"}:
+        execution.tool_name = spec.name
+    return execution
 
 
 def _dedupe_source_refs(executions: list[AssistantToolExecution]) -> list[dict[str, object]]:
@@ -309,20 +530,19 @@ def _compose_unsupported(bundle: AssistantContextBundle) -> AssistantAnswerDraft
     return AssistantAnswerDraft(
         intent="unsupported_or_ambiguous",
         status="unsupported",
-        confidence=0.95,
-        title="Запрос вне контура MAGAMAX",
+        confidence=0.82,
+        title="Не по рабочим данным MAGAMAX",
         summary=(
-            "Отказ: Шайтан-машина отвечает только на вопросы, сопряжённые с рабочими данными MAGAMAX, "
-            "загрузками, резервами, SKU, складом, поставками, качеством данных и расчётами по этим данным."
+            "Я могу помочь только с работой MAGAMAX: загрузками, продажами, резервами, SKU, "
+            "складом, поставками, качеством данных и расчётами по этим данным."
         ),
         sections=[
             _section(
                 section_type="warning_block",
-                title="Что можно спрашивать",
+                title="Если вопрос про MAGAMAX",
                 items=[
-                    "состояние загруженных данных, ingestion, mapping и quality issues",
-                    "расчёт и объяснение резерва по клиентам, SKU и категориям",
-                    "склад, покрытие, входящие поставки, дефицит и операционные риски MAGAMAX",
+                    "Сформулируйте его через клиента, SKU, период, склад, загрузку, резерв или отчёт.",
+                    "Если я не понял рабочий контекст, я уточню недостающие параметры.",
                 ],
             )
         ],
@@ -794,6 +1014,93 @@ def _compose_answer(
             source_refs=source_refs,
             tool_calls=executions,
             followups=_generic_followups("stock_risk_summary", bundle),
+            warnings=warnings,
+            context_used=bundle.context,
+        )
+
+    if bundle.route.intent == "sales_summary":
+        payload = tool_map["get_sales_summary"].payload or {}
+        row_count = int(payload.get("row_count") or 0) if isinstance(payload, dict) else 0
+        quantity = float(payload.get("quantity") or 0) if isinstance(payload, dict) else 0
+        revenue = float(payload.get("revenue") or 0) if isinstance(payload, dict) else 0
+        period = (
+            f"{payload.get('date_from')} - {payload.get('date_to')}"
+            if isinstance(payload, dict)
+            else "период не определён"
+        )
+        sections = [
+            _section(
+                section_type="narrative",
+                title="Продажи",
+                body=(
+                    f"За период {period} найдено {row_count} строк продаж: "
+                    f"{_qty(quantity)} шт. и {_metric_value(revenue, 'rub')} выручки."
+                ),
+            ),
+            _section(
+                section_type="metric_summary",
+                title="Ключевые метрики",
+                metrics=[
+                    _metric("quantity", "Количество", f"{_qty(quantity)} шт."),
+                    _metric("revenue", "Выручка", _metric_value(revenue, "rub"), "positive" if revenue else "neutral"),
+                    _metric("rows", "Строк", str(row_count)),
+                ],
+            ),
+        ]
+        return AssistantAnswerDraft(
+            intent="sales_summary",
+            status="completed" if row_count else "partial",
+            confidence=0.84 if row_count else 0.58,
+            title="Сводка продаж",
+            summary=sections[0]["body"] or "",
+            sections=sections,
+            source_refs=source_refs,
+            tool_calls=executions,
+            followups=_generic_followups("sales_summary", bundle),
+            warnings=warnings,
+            context_used=bundle.context,
+        )
+
+    if bundle.route.intent == "period_comparison":
+        payload = tool_map["get_period_comparison"].payload or {}
+        current_value = float(payload.get("current_value") or 0) if isinstance(payload, dict) else 0
+        previous_value = float(payload.get("previous_value") or 0) if isinstance(payload, dict) else 0
+        delta = float(payload.get("delta") or 0) if isinstance(payload, dict) else 0
+        delta_pct = payload.get("delta_pct") if isinstance(payload, dict) else None
+        metric = str(payload.get("metric") or "revenue") if isinstance(payload, dict) else "revenue"
+        unit = "rub" if metric == "revenue" else "qty"
+        delta_text = "н/д" if delta_pct is None else f"{float(delta_pct):.1f}%"
+        sections = [
+            _section(
+                section_type="narrative",
+                title="Сравнение периодов",
+                body=(
+                    f"Текущий период: {_metric_value(current_value, unit)}; "
+                    f"предыдущий период: {_metric_value(previous_value, unit)}. "
+                    f"Изменение: {_metric_value(delta, unit)} ({delta_text})."
+                ),
+            ),
+            _section(
+                section_type="metric_summary",
+                title="Динамика",
+                metrics=[
+                    _metric("current", "Текущий", _metric_value(current_value, unit)),
+                    _metric("previous", "Предыдущий", _metric_value(previous_value, unit)),
+                    _metric("delta", "Разница", _metric_value(delta, unit), "positive" if delta >= 0 else "warning"),
+                    _metric("delta_pct", "Изменение", delta_text),
+                ],
+            ),
+        ]
+        return AssistantAnswerDraft(
+            intent="period_comparison",
+            status="completed" if payload.get("status") == "completed" else "partial",  # type: ignore[union-attr]
+            confidence=0.82 if payload.get("status") == "completed" else 0.56,  # type: ignore[union-attr]
+            title="Сравнение с прошлым периодом",
+            summary=sections[0]["body"] or "",
+            sections=sections,
+            source_refs=source_refs,
+            tool_calls=executions,
+            followups=_generic_followups("period_comparison", bundle),
             warnings=warnings,
             context_used=bundle.context,
         )
@@ -1296,19 +1603,7 @@ def _apply_history_fallback_plan(
 
 
 def _tool_plan(intent: str) -> list[str]:
-    plans = {
-        "reserve_calculation": ["calculate_reserve", "get_quality_issues", "get_upload_status"],
-        "reserve_explanation": ["get_reserve_explanation", "get_sku_summary", "get_quality_issues"],
-        "sku_summary": ["get_sku_summary", "get_quality_issues"],
-        "client_summary": ["get_client_summary", "get_dashboard_summary"],
-        "diy_coverage_check": ["get_client_summary", "get_dashboard_summary"],
-        "inbound_impact": ["get_inbound_impact", "get_dashboard_summary"],
-        "stock_risk_summary": ["get_stock_coverage", "get_dashboard_summary"],
-        "upload_status_summary": ["get_upload_status", "get_dashboard_summary", "get_quality_issues"],
-        "quality_issue_summary": ["get_quality_issues", "get_upload_status"],
-        "management_report_summary": ["get_management_report"],
-    }
-    return plans.get(intent, [])
+    return get_default_tool_registry().default_plan_for_intent(intent)
 
 
 def _execution_plan(intent: str, planned_tool_names: list[str]) -> list[str]:
@@ -1343,11 +1638,13 @@ def execute_assistant_query(
     *,
     payload: AssistantQueryRequest,
     created_by_id: str | None,
+    current_user: User | None = None,
     history: list[dict[str, object]] | None = None,
 ) -> AssistantResponse:
     trace_id = generate_id("trace")
     question = payload.prompt_text()
     history_items = history or []
+    session_state = derive_state_from_history(history_items)  # type: ignore[arg-type]
     deterministic_route = route_question(db, question)
     plan = plan_route_with_provider(
         settings,
@@ -1355,6 +1652,11 @@ def execute_assistant_query(
         deterministic_intent=deterministic_route.intent,
         history=history_items,
     )
+    state_params = resolve_followup_from_state(question, session_state, plan.params)
+    if state_params.get("_pending_intent") and plan.intent in {"free_chat", "unsupported_or_ambiguous"}:
+        plan.intent = str(state_params["_pending_intent"])  # type: ignore[assignment]
+    if state_params.get("_followup_intent") and plan.intent in {"free_chat", "unsupported_or_ambiguous"}:
+        plan.intent = str(state_params["_followup_intent"])  # type: ignore[assignment]
     planned_intent, tool_question = _apply_history_fallback_plan(
         question=question,
         deterministic_intent=deterministic_route.intent,
@@ -1368,37 +1670,102 @@ def execute_assistant_query(
         forced_intent=planned_intent,  # type: ignore[arg-type]
     )
     bundle = build_context_bundle(db, route=route, pinned_context=payload.context)
+    registry = get_default_tool_registry()
+    tool_names = _execution_plan(route.intent, plan.tool_names)
+    params = _params_from_route(
+        question=tool_question,
+        bundle=bundle,
+        plan_params=plan.params,
+        state_params=state_params,
+    )
+    primary_tool_name = tool_names[0] if tool_names else None
+    missing_fields: list[AssistantMissingField] = []
+    if primary_tool_name:
+        missing_fields.extend(registry.validate(primary_tool_name, params))
+    for item in plan.missing_fields:
+        field = AssistantMissingField(
+            name=str(item.get("name") or item.get("field") or ""),
+            label=str(item.get("label") or item.get("name") or item.get("field") or ""),
+            question=str(item.get("question") or plan.followup_question or ""),
+        )
+        if field.name and all(existing.name != field.name for existing in missing_fields):
+            missing_fields.append(field)
+    session_state = merge_state(
+        session_state,
+        intent=route.intent,
+        params=params,
+        missing_fields=missing_fields,
+        pending_question=question,
+    )
+    if missing_fields:
+        draft = _compose_clarification(
+            intent=route.intent,
+            missing_fields=missing_fields,
+            bundle=bundle,
+        )
+        draft.trace_metadata = _trace_metadata(
+            resolved_intent=route.intent,
+            resolved_tool=primary_tool_name,
+            missing_fields=missing_fields,
+            clarification_reason="required_fields_missing",
+            source_refs_count=len(draft.source_refs),
+        )
+        draft, provider_name, _provider_warnings, finalize_usage = finalize_with_provider(settings, draft)
+        token_usage = combine_token_usage(plan.token_usage, finalize_usage)
+        return _response_from_draft(
+            payload=payload,
+            draft=draft,
+            provider_name=provider_name,
+            token_usage=token_usage,
+            trace_id=trace_id,
+        )
 
     executions: list[AssistantToolExecution] = []
-    for tool_name in _execution_plan(route.intent, plan.tool_names):
-        if tool_name == "calculate_reserve":
-            executions.append(tool_calculate_reserve(db, bundle, created_by_id=created_by_id))
-        elif tool_name == "get_reserve_explanation":
-            executions.append(tool_reserve_explanation(db, bundle))
-        elif tool_name == "get_sku_summary":
-            executions.append(tool_get_sku_summary(db, bundle))
-        elif tool_name == "get_client_summary":
-            executions.append(tool_get_client_summary(db, bundle))
-        elif tool_name == "get_inbound_impact":
-            executions.append(tool_get_inbound_impact(db, bundle))
-        elif tool_name == "get_stock_coverage":
-            executions.append(tool_get_stock_risk(db, bundle))
-        elif tool_name == "get_upload_status":
-            executions.append(tool_get_upload_status(db, bundle))
-        elif tool_name == "get_quality_issues":
-            executions.append(tool_get_quality_issues(db, bundle))
-        elif tool_name == "get_dashboard_summary":
-            executions.append(tool_get_dashboard_summary(db))
-        elif tool_name == "get_management_report":
-            executions.append(tool_get_management_report(db, tool_question))
+    for tool_name in tool_names:
+        spec = registry.lookup(tool_name)
+        tool_params = params if spec.intent == route.intent or tool_name == primary_tool_name else {}
+        executions.append(
+            _dispatch_tool(
+                db,
+                spec=spec,
+                bundle=bundle,
+                params=tool_params,
+                created_by_id=created_by_id,
+                current_user=current_user,
+            )
+        )
 
     draft = _compose_answer(bundle, executions, question=question)
+    draft.trace_metadata = _trace_metadata(
+        resolved_intent=route.intent,
+        resolved_tool=primary_tool_name,
+        missing_fields=[],
+        source_refs_count=len(draft.source_refs),
+    )
     draft, provider_name, _provider_warnings, finalize_usage = finalize_with_provider(settings, draft)
     token_usage = combine_token_usage(plan.token_usage, finalize_usage)
 
+    return _response_from_draft(
+        payload=payload,
+        draft=draft,
+        provider_name=provider_name,
+        token_usage=token_usage,
+        trace_id=trace_id,
+    )
+
+
+def _response_from_draft(
+    *,
+    payload: AssistantQueryRequest,
+    draft: AssistantAnswerDraft,
+    provider_name: str,
+    token_usage: object,
+    trace_id: str,
+) -> AssistantResponse:
     return AssistantResponse(
         answerId=generate_id("ans"),
         sessionId=payload.session_id,
+        type=draft.response_type,  # type: ignore[arg-type]
         intent=draft.intent,
         status=draft.status,  # type: ignore[arg-type]
         confidence=round(draft.confidence, 2),
@@ -1429,11 +1796,15 @@ def execute_assistant_query(
         traceId=trace_id,
         provider=provider_name,
         tokenUsage=AssistantTokenUsage(
-            inputTokens=token_usage.input_tokens,
-            outputTokens=token_usage.output_tokens,
-            totalTokens=token_usage.total_tokens,
-            estimatedCostUsd=token_usage.estimated_cost_usd,
-            estimatedCostRub=token_usage.estimated_cost_rub,
+            inputTokens=token_usage.input_tokens,  # type: ignore[attr-defined]
+            outputTokens=token_usage.output_tokens,  # type: ignore[attr-defined]
+            totalTokens=token_usage.total_tokens,  # type: ignore[attr-defined]
+            estimatedCostUsd=token_usage.estimated_cost_usd,  # type: ignore[attr-defined]
+            estimatedCostRub=token_usage.estimated_cost_rub,  # type: ignore[attr-defined]
         ),
         contextUsed=_context_schema(draft.context_used),
+        missingFields=draft.missing_fields,
+        suggestedChips=draft.suggested_chips,
+        pendingIntent=draft.pending_intent,  # type: ignore[arg-type]
+        traceMetadata=draft.trace_metadata,
     )

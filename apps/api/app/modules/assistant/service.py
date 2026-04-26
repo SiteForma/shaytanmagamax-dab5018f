@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import time
+from collections.abc import Iterator
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -96,6 +99,12 @@ def _message_history_for_planning(messages: list[AssistantMessage]) -> list[dict
                 "status": message.status,
                 "title": response_payload.get("title") if isinstance(response_payload, dict) else None,
                 "summary": response_payload.get("summary") if isinstance(response_payload, dict) else None,
+                "type": response_payload.get("type") if isinstance(response_payload, dict) else None,
+                "pendingIntent": response_payload.get("pendingIntent") if isinstance(response_payload, dict) else None,
+                "missingFields": (response_payload.get("missingFields") or [])[:6]
+                if isinstance(response_payload, dict)
+                else [],
+                "contextUsed": response_payload.get("contextUsed") if isinstance(response_payload, dict) else None,
                 "sourceRefs": (response_payload.get("sourceRefs") or [])[:4]
                 if isinstance(response_payload, dict)
                 else [],
@@ -199,14 +208,27 @@ def list_assistant_messages(
     ]
 
 
-def post_assistant_message(
+def _assistant_stream_chunks(text: str, *, chunk_size: int = 28) -> Iterator[str]:
+    normalized = text or ""
+    if not normalized:
+        return
+    start = 0
+    while start < len(normalized):
+        end = min(len(normalized), start + chunk_size)
+        next_space = normalized.find(" ", end)
+        if next_space != -1 and next_space - start <= chunk_size + 18:
+            end = next_space + 1
+        yield normalized[start:end]
+        start = end
+
+
+def _prepare_assistant_turn(
     db: Session,
-    settings: Settings,
     *,
     session_id: str,
     payload: AssistantMessageCreateRequest,
     current_user: User | None,
-) -> AssistantSessionMessageResult:
+) -> tuple[list[AssistantMessage], AssistantPinnedContext, AssistantMessage]:
     session = get_session(db, session_id, user_id=current_user.id if current_user else None)
     previous_messages = list_messages(
         db,
@@ -227,6 +249,19 @@ def post_assistant_message(
         text=payload.text,
         context=context,
     )
+    return previous_messages, context, user_message
+
+
+def _complete_assistant_turn(
+    db: Session,
+    settings: Settings,
+    *,
+    session_id: str,
+    payload: AssistantMessageCreateRequest,
+    current_user: User | None,
+    previous_messages: list[AssistantMessage],
+    context: AssistantPinnedContext,
+) -> tuple[AssistantResponse, AssistantMessage]:
     response = execute_assistant_query(
         db,
         settings,
@@ -237,6 +272,7 @@ def post_assistant_message(
             context=context,
         ),
         created_by_id=current_user.id if current_user else None,
+        current_user=current_user,
         history=_message_history_for_planning(previous_messages),
     )
     assistant_message = append_assistant_message(
@@ -252,7 +288,18 @@ def post_assistant_message(
         context=context,
         response=response,
     )
-    db.commit()
+    return response, assistant_message
+
+
+def _assistant_turn_result(
+    db: Session,
+    *,
+    session_id: str,
+    current_user: User | None,
+    user_message: AssistantMessage,
+    assistant_message: AssistantMessage,
+    response: AssistantResponse,
+) -> AssistantSessionMessageResult:
     updated_session = get_session(db, session_id, user_id=current_user.id if current_user else None)
     return AssistantSessionMessageResult(
         session=serialize_session(
@@ -263,6 +310,139 @@ def post_assistant_message(
         assistantMessage=serialize_message(assistant_message),
         response=response,
     )
+
+
+def post_assistant_message(
+    db: Session,
+    settings: Settings,
+    *,
+    session_id: str,
+    payload: AssistantMessageCreateRequest,
+    current_user: User | None,
+) -> AssistantSessionMessageResult:
+    previous_messages, context, user_message = _prepare_assistant_turn(
+        db,
+        session_id=session_id,
+        payload=payload,
+        current_user=current_user,
+    )
+    response, assistant_message = _complete_assistant_turn(
+        db,
+        settings,
+        session_id=session_id,
+        payload=payload,
+        current_user=current_user,
+        previous_messages=previous_messages,
+        context=context,
+    )
+    db.commit()
+    return _assistant_turn_result(
+        db,
+        session_id=session_id,
+        current_user=current_user,
+        user_message=user_message,
+        assistant_message=assistant_message,
+        response=response,
+    )
+
+
+def stream_assistant_message_events(
+    db: Session,
+    settings: Settings,
+    *,
+    session_id: str,
+    payload: AssistantMessageCreateRequest,
+    current_user: User | None,
+) -> Iterator[dict[str, object]]:
+    yield {
+        "type": "thinking",
+        "sessionId": session_id,
+        "stage": "received",
+        "message": "Запрос принят. Собираю контекст MAGAMAX.",
+    }
+    try:
+        previous_messages, context, user_message = _prepare_assistant_turn(
+            db,
+            session_id=session_id,
+            payload=payload,
+            current_user=current_user,
+        )
+        yield {
+            "type": "thinking",
+            "sessionId": session_id,
+            "stage": "planning",
+            "message": "Определяю смысл запроса и нужные инструменты MAGAMAX.",
+            "userMessage": serialize_message(user_message).model_dump(by_alias=True),
+        }
+        response, assistant_message = _complete_assistant_turn(
+            db,
+            settings,
+            session_id=session_id,
+            payload=payload,
+            current_user=current_user,
+            previous_messages=previous_messages,
+            context=context,
+        )
+        result = _assistant_turn_result(
+            db,
+            session_id=session_id,
+            current_user=current_user,
+            user_message=user_message,
+            assistant_message=assistant_message,
+            response=response,
+        )
+        db.commit()
+
+        if response.response_type == "clarification" or response.status == "needs_clarification":
+            yield {
+                "type": "clarification",
+                "messageId": assistant_message.id,
+                "responseId": response.answer_id,
+                "intent": response.intent,
+                "summary": response.summary,
+                "missingFields": response.missing_fields,
+                "suggestedChips": response.suggested_chips,
+                "pendingIntent": response.pending_intent,
+            }
+
+        for tool_call in response.tool_calls:
+            yield {
+                "type": "tool_call",
+                "messageId": assistant_message.id,
+                "responseId": response.answer_id,
+                "toolName": tool_call.tool_name,
+                "arguments": tool_call.arguments,
+            }
+            yield {
+                "type": "tool_result",
+                "messageId": assistant_message.id,
+                "responseId": response.answer_id,
+                "toolName": tool_call.tool_name,
+                "status": tool_call.status,
+                "summary": tool_call.summary,
+                "latencyMs": tool_call.latency_ms,
+            }
+
+        for delta in _assistant_stream_chunks(response.summary):
+            yield {
+                "type": "answer_delta",
+                "messageId": assistant_message.id,
+                "responseId": response.answer_id,
+                "delta": delta,
+            }
+            time.sleep(0.018)
+
+        yield {
+            "type": "done",
+            "result": result.model_dump(by_alias=True),
+        }
+    except Exception as exc:
+        db.rollback()
+        yield {
+            "type": "error",
+            "code": getattr(exc, "code", "assistant_stream_failed"),
+            "message": getattr(exc, "message", str(exc)),
+        }
 
 
 def assistant_query(
@@ -290,6 +470,7 @@ def assistant_query(
         settings,
         payload=payload,
         created_by_id=current_user.id if current_user else None,
+        current_user=current_user,
     )
 
 
@@ -308,6 +489,8 @@ def get_assistant_capabilities(settings: Settings) -> AssistantCapabilitiesRespo
             AssistantCapability(key="upload_status_summary", label="Freshness и ingestion-контур"),
             AssistantCapability(key="quality_issue_summary", label="Качество данных"),
             AssistantCapability(key="management_report_summary", label="Управленческий отчёт 2025"),
+            AssistantCapability(key="sales_summary", label="Сводка продаж"),
+            AssistantCapability(key="period_comparison", label="Сравнение периодов"),
         ],
         sessionSupport=True,
         pinnedContextSupport=True,
