@@ -1,0 +1,45 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: shaytan-machine-postgres
+    environment:
+      POSTGRES_DB: shaytan_machine
+      POSTGRES_USER: magamax
+      POSTGRES_PASSWORD: magamax
+    ports:
+      - "15432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7
+    container_name: shaytan-machine-redis
+    ports:
+      - "16379:6379"
+
+  minio:
+    image: minio/minio:latest
+    container_name: shaytan-machine-minio
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data --console-address ":9001"
+    ports:
+      - "19000:9000"
+      - "19001:9001"
+    volumes:
+      - minio-data:/data
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.104.0
+    container_name: shaytan-machine-otel
+    command: ["--config=/etc/otelcol-contrib/config.yml"]
+    ports:
+      - "14317:4317"
+      - "14318:4318"
+    volumes:
+      - ../otel/otel-collector-config.yml:/etc/otelcol-contrib/config.yml:ro
+
+volumes:
+  postgres-data:
+  minio-data:

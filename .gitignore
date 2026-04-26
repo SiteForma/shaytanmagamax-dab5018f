@@ -11,6 +11,26 @@ node_modules
 dist
 dist-ssr
 *.local
+.venv
+.pytest_cache
+.ruff_cache
+.mypy_cache
+.coverage
+htmlcov
+data/object-storage
+data/analytics
+data/dev
+data/exports
+data/manual-check
+apps/web/node_modules
+apps/web/dist
+__pycache__
+*.pyc
+*.egg-info
+.env
+.env.*
+!.env.example
+!.env.staging.example
 
 # Editor directories and files
 .vscode/*
