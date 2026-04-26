@@ -3,6 +3,7 @@ import { queryKeys } from "@/lib/query/keys";
 import {
   applyMappingTemplate,
   applyUpload,
+  confirmUploadSourceType,
   createMappingTemplate,
   createUploadJob,
   getMappingTemplates,
@@ -26,6 +27,8 @@ export function useUploadJobsQuery(filters: {
       getUploadJobs({
         status: filters.status as any,
         sourceType: filters.sourceType as any,
+        page: filters.page,
+        pageSize: filters.pageSize,
       }),
   });
 }
@@ -68,6 +71,22 @@ export function useCreateUploadMutation() {
   return useMutation({
     mutationFn: ({ file, sourceType }: { file: File; sourceType?: string }) =>
       createUploadJob(file, sourceType as any),
+    onSuccess: (detail) => invalidateUploadQueries(queryClient, detail.file.id),
+  });
+}
+
+export function useConfirmUploadSourceTypeMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      fileId,
+      sourceType,
+      newEntityName,
+    }: {
+      fileId: string;
+      sourceType: string;
+      newEntityName?: string;
+    }) => confirmUploadSourceType(fileId, { sourceType: sourceType as any, newEntityName }),
     onSuccess: (detail) => invalidateUploadQueries(queryClient, detail.file.id),
   });
 }

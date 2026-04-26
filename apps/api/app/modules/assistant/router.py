@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy.orm import Session
 
 from apps.api.app.api.dependencies import get_settings_dependency, require_capability
@@ -24,6 +24,7 @@ from apps.api.app.modules.assistant.schemas import (
 from apps.api.app.modules.assistant.service import (
     assistant_query,
     create_assistant_session,
+    delete_assistant_session,
     get_assistant_capabilities,
     get_assistant_session_detail,
     get_context_options,
@@ -97,6 +98,25 @@ def update_session_route(
     )
     db.commit()
     return session
+
+
+@router.delete("/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_session_route(
+    session_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_capability("assistant", "query")),
+) -> Response:
+    delete_assistant_session(db, session_id=session_id, current_user=current_user)
+    record_audit_event(
+        db,
+        actor_user_id=current_user.id,
+        action="assistant.session_deleted",
+        target_type="assistant_session",
+        target_id=session_id,
+        context={},
+    )
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/sessions/{session_id}/messages", response_model=list[AssistantMessageResponse])

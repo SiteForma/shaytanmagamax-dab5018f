@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import Counter
 from datetime import date, datetime
+import re
 
 from fastapi import UploadFile
 from sqlalchemy import delete, func, select
@@ -13,6 +14,7 @@ from apps.api.app.core.errors import DomainError
 from apps.api.app.db.models import (
     Category,
     Client,
+    DataSource,
     DiyPolicy,
     InboundDelivery,
     JobRun,
@@ -34,6 +36,7 @@ from apps.api.app.modules.mapping.service import (
     get_mapping_template,
     list_canonical_fields,
     list_required_fields,
+    rank_source_type_candidates,
     resolve_client_by_name_or_alias,
     resolve_sku_by_code_or_alias,
     source_supports_apply,
@@ -56,6 +59,8 @@ from apps.api.app.modules.uploads.schemas import (
     UploadJobRunResponse,
     UploadPreviewResponse,
     UploadReadinessResponse,
+    UploadSourceDetectionResponse,
+    UploadSourceTypeCandidateResponse,
     UploadValidationSummaryResponse,
 )
 from apps.api.app.modules.uploads.storage import get_object_storage
@@ -244,14 +249,44 @@ def _readiness(batch: UploadBatch) -> UploadReadinessResponse:
     validation_payload = batch.validation_payload or {}
     has_blocking_issues = bool(validation_payload.get("has_blocking_issues", False))
     supports_apply = source_supports_apply(batch.source_type)
+    detection_payload = dict(batch.mapping_payload.get("source_detection") or {})
+    source_confirmed = not detection_payload.get("requires_confirmation") or bool(
+        detection_payload.get("confirmed")
+    )
     return UploadReadinessResponse(
         can_apply=bool(
             supports_apply
             and batch.status in {"ready_to_apply", "applied_with_warnings", "applied"}
             and not has_blocking_issues
+            and source_confirmed
         ),
-        can_validate=bool(batch.mapping_payload.get("active_mapping")) and batch.source_type != "raw_report",
+        can_validate=bool(batch.mapping_payload.get("active_mapping"))
+        and batch.source_type != "raw_report"
+        and source_confirmed,
         can_edit_mapping=batch.status not in {"applying"},
+    )
+
+
+def _source_detection_state(batch: UploadBatch) -> UploadSourceDetectionResponse | None:
+    payload = batch.mapping_payload.get("source_detection") if batch.mapping_payload else None
+    if not isinstance(payload, dict):
+        return None
+    candidates = [
+        UploadSourceTypeCandidateResponse(
+            source_type=str(item.get("source_type", "raw_report")),
+            confidence=float(item.get("confidence", 0)),
+            matched_fields=[str(field) for field in item.get("matched_fields", [])],
+        )
+        for item in payload.get("candidates", [])
+        if isinstance(item, dict)
+    ]
+    return UploadSourceDetectionResponse(
+        requires_confirmation=bool(payload.get("requires_confirmation", False)),
+        confirmed=bool(payload.get("confirmed", False)),
+        detected_source_type=str(payload.get("detected_source_type") or batch.detected_source_type or batch.source_type),
+        selected_source_type=str(payload.get("selected_source_type") or batch.source_type),
+        candidates=candidates,
+        custom_entity_name=str(payload["custom_entity_name"]) if payload.get("custom_entity_name") else None,
     )
 
 
@@ -281,6 +316,7 @@ def _file_summary(file_model: UploadFileModel, batch: UploadBatch) -> UploadFile
         duplicate_of_batch_id=batch.duplicate_of_batch_id,
         is_duplicate=batch.duplicate_of_batch_id is not None,
         readiness=_readiness(batch),
+        source_detection=_source_detection_state(batch),
     )
 
 
@@ -347,6 +383,31 @@ def _duplicate_batch_id(db: Session, checksum: str, current_batch_id: str) -> st
         .order_by(UploadBatch.created_at.desc())
     ).first()
     return duplicate.id if duplicate else None
+
+
+def _slugify_source_name(value: str) -> str:
+    normalized = re.sub(r"[^a-zA-Z0-9а-яА-ЯёЁ]+", "_", value.strip().lower())
+    normalized = normalized.strip("_")
+    return normalized or "custom_report"
+
+
+def _create_custom_data_source(db: Session, name: str) -> DataSource:
+    base_code = f"custom_{_slugify_source_name(name)}"
+    code = base_code[:56]
+    suffix = 1
+    while db.scalar(select(func.count()).select_from(DataSource).where(DataSource.code == code)):
+        suffix += 1
+        code = f"{base_code[:50]}_{suffix}"
+    data_source = DataSource(
+        code=code,
+        name=name.strip(),
+        source_type="raw_report",
+        parsing_version="v1",
+        normalization_version="v1",
+    )
+    db.add(data_source)
+    db.flush()
+    return data_source
 
 
 def _persist_uploaded_issue(
@@ -452,6 +513,9 @@ def _run_parse_stage(
     batch: UploadBatch,
     file_model: UploadFileModel,
     source_type_hint: str | None = None,
+    *,
+    require_source_confirmation: bool = False,
+    custom_entity_name: str | None = None,
 ) -> None:
     _transition_batch_status(batch, "parsing", message="Разбираем загруженный файл")
     job_run = _create_job_run(db, batch.id, file_model.id, "parse_upload")
@@ -459,11 +523,13 @@ def _run_parse_stage(
     try:
         parse_result = _read_frame(settings, file_model.storage_key, file_model.file_name)
         frame = parse_result.frame
+        source_candidates = rank_source_type_candidates([str(column) for column in frame.columns])
         detected_source_type = detect_source_type(
-            [str(column) for column in frame.columns], source_type_hint or batch.source_type
+            [str(column) for column in frame.columns], source_type_hint
         )
         batch.source_type = detected_source_type
         batch.detected_source_type = detected_source_type
+        file_model.source_type = detected_source_type
         batch.total_rows = len(frame.index)
         batch.checksum = file_model.checksum
         batch.duplicate_of_batch_id = _duplicate_batch_id(db, file_model.checksum, batch.id)
@@ -488,9 +554,36 @@ def _run_parse_stage(
             "suggestions": _serialize_mapping_fields(suggestions),
             "active_mapping": active_mapping,
             "required_fields": sorted(required_fields),
+            "source_detection": {
+                "requires_confirmation": require_source_confirmation,
+                "confirmed": not require_source_confirmation,
+                "detected_source_type": detected_source_type,
+                "selected_source_type": detected_source_type,
+                "candidates": source_candidates,
+                "custom_entity_name": custom_entity_name,
+            },
         }
         db.execute(delete(UploadedRowIssue).where(UploadedRowIssue.batch_id == batch.id))
-        if detected_source_type == "raw_report":
+        if require_source_confirmation:
+            batch.validation_payload = {
+                "validated_at": None,
+                "valid_rows": 0,
+                "failed_rows": 0,
+                "warning_count": 0,
+                "has_blocking_issues": False,
+                "issue_counts": {"info": 0, "warning": 0, "error": 0, "critical": 0, "total": 0},
+                "source_type": detected_source_type,
+            }
+            batch.valid_rows = 0
+            batch.failed_rows = 0
+            batch.warning_count = 0
+            batch.issue_count = 0
+            _transition_batch_status(
+                batch,
+                "source_confirmation_required",
+                message="Тип данных распознан автоматически и ожидает подтверждения",
+            )
+        elif detected_source_type == "raw_report":
             batch.validation_payload = {
                 "validated_at": utc_now().isoformat(),
                 "valid_rows": batch.total_rows,
@@ -1232,10 +1325,49 @@ def create_upload_file(
     db.add(file_model)
     db.commit()
 
-    _run_parse_stage(db, settings, batch, file_model, source_type_hint=source_type)
+    _run_parse_stage(
+        db,
+        settings,
+        batch,
+        file_model,
+        source_type_hint=source_type,
+        require_source_confirmation=source_type is None,
+    )
     if batch.status == "validating":
         return validate_upload_file(db, settings, file_model.id)
     return get_upload_file_detail(db, file_model.id)
+
+
+def confirm_upload_source_type(
+    db: Session,
+    settings: Settings,
+    file_id: str,
+    *,
+    source_type: str,
+    new_entity_name: str | None = None,
+) -> UploadFileDetailResponse:
+    file_model, batch = _get_file_and_batch(db, file_id)
+    selected_source_type = source_type
+    custom_entity_name = None
+    if new_entity_name and new_entity_name.strip():
+        data_source = _create_custom_data_source(db, new_entity_name.strip())
+        selected_source_type = data_source.source_type
+        custom_entity_name = data_source.name
+    elif selected_source_type not in SOURCE_TYPES:
+        raise DomainError(code="unsupported_source_type", message="Неподдерживаемый тип источника")
+
+    _run_parse_stage(
+        db,
+        settings,
+        batch,
+        file_model,
+        source_type_hint=selected_source_type,
+        require_source_confirmation=False,
+        custom_entity_name=custom_entity_name,
+    )
+    if batch.status == "validating":
+        return validate_upload_file(db, settings, file_id)
+    return get_upload_file_detail(db, file_id)
 
 
 def apply_mapping_template_to_upload(

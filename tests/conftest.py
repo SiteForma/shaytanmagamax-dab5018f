@@ -26,6 +26,9 @@ def test_settings(tmp_path: Path) -> Settings:
         duckdb_path=str(tmp_path / "analytics.duckdb"),
         dev_admin_email="admin@magamax.local",
         dev_admin_password="magamax-admin",
+        assistant_provider="deterministic",
+        assistant_llm_enabled=False,
+        assistant_openai_api_key=None,
     )
 
 

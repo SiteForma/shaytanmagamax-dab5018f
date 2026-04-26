@@ -172,7 +172,7 @@ def test_production_settings_disable_implicit_startup_mutations() -> None:
 
 
 def test_production_settings_block_unsafe_defaults() -> None:
-    settings = Settings(app_env="production")
+    settings = Settings(app_env="production", database_url="sqlite:///unsafe-prod.db")
     errors = settings.production_startup_errors()
     assert "APP_DEBUG must be false in production" in errors
     assert "DATABASE_URL must point to PostgreSQL in production" in errors

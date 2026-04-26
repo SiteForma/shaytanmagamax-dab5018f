@@ -480,6 +480,98 @@ class JobRun(TimestampMixin, Base):
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
+class ManagementReportImport(TimestampMixin, Base):
+    __tablename__ = "management_report_imports"
+
+    id: Mapped[str] = mapped_column(
+        String(40), primary_key=True, default=lambda: generate_id("mrimp")
+    )
+    file_name: Mapped[str] = mapped_column(String(255))
+    source_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    checksum: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    report_year: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    sheet_count: Mapped[int] = mapped_column(Integer, default=0)
+    raw_row_count: Mapped[int] = mapped_column(Integer, default=0)
+    metric_count: Mapped[int] = mapped_column(Integer, default=0)
+    imported_by_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    metadata_payload: Mapped[dict[str, object]] = mapped_column(
+        MutableDict.as_mutable(JSON), default=dict
+    )
+    rows: Mapped[list["ManagementReportRow"]] = relationship(
+        back_populates="report_import", cascade="all, delete-orphan"
+    )
+    metrics: Mapped[list["ManagementReportMetric"]] = relationship(
+        back_populates="report_import", cascade="all, delete-orphan"
+    )
+
+
+class ManagementReportRow(TimestampMixin, Base):
+    __tablename__ = "management_report_rows"
+
+    id: Mapped[str] = mapped_column(
+        String(40), primary_key=True, default=lambda: generate_id("mrrow")
+    )
+    import_id: Mapped[str] = mapped_column(
+        ForeignKey("management_report_imports.id", ondelete="CASCADE"), index=True
+    )
+    sheet_name: Mapped[str] = mapped_column(String(255), index=True)
+    row_index: Mapped[int] = mapped_column(Integer)
+    is_header: Mapped[bool] = mapped_column(Boolean, default=False)
+    parsed_metric_count: Mapped[int] = mapped_column(Integer, default=0)
+    raw_values: Mapped[list[object]] = mapped_column(MutableList.as_mutable(JSON), default=list)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    report_import: Mapped[ManagementReportImport] = relationship(back_populates="rows")
+
+
+class OrganizationUnit(TimestampMixin, Base):
+    __tablename__ = "organization_units"
+    __table_args__ = (
+        UniqueConstraint("unit_type", "code", name="uq_organization_unit_type_code"),
+    )
+
+    id: Mapped[str] = mapped_column(
+        String(40), primary_key=True, default=lambda: generate_id("org")
+    )
+    unit_type: Mapped[str] = mapped_column(String(64), default="department", index=True)
+    code: Mapped[str] = mapped_column(String(120), index=True)
+    name: Mapped[str] = mapped_column(String(255), index=True)
+    display_name: Mapped[str] = mapped_column(String(255))
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    source_import_id: Mapped[str | None] = mapped_column(
+        ForeignKey("management_report_imports.id"), nullable=True, index=True
+    )
+    metadata_payload: Mapped[dict[str, object]] = mapped_column(
+        MutableDict.as_mutable(JSON), default=dict
+    )
+
+
+class ManagementReportMetric(TimestampMixin, Base):
+    __tablename__ = "management_report_metrics"
+
+    id: Mapped[str] = mapped_column(
+        String(40), primary_key=True, default=lambda: generate_id("mrm")
+    )
+    import_id: Mapped[str] = mapped_column(
+        ForeignKey("management_report_imports.id", ondelete="CASCADE"), index=True
+    )
+    source_row_id: Mapped[str | None] = mapped_column(
+        ForeignKey("management_report_rows.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    sheet_name: Mapped[str] = mapped_column(String(255), index=True)
+    row_index: Mapped[int] = mapped_column(Integer)
+    dimension_type: Mapped[str] = mapped_column(String(80), index=True)
+    dimension_code: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
+    dimension_name: Mapped[str] = mapped_column(String(255), index=True)
+    metric_name: Mapped[str] = mapped_column(String(120), index=True)
+    metric_year: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    metric_value: Mapped[float] = mapped_column(Numeric(18, 4))
+    metric_unit: Mapped[str] = mapped_column(String(32), default="rub")
+    raw_payload: Mapped[dict[str, object]] = mapped_column(
+        MutableDict.as_mutable(JSON), default=dict
+    )
+    report_import: Mapped[ManagementReportImport] = relationship(back_populates="metrics")
+
+
 class ExportJob(TimestampMixin, Base):
     __tablename__ = "export_jobs"
 

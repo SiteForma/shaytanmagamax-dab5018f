@@ -41,6 +41,9 @@ class Settings(BaseSettings):
     assistant_openai_base_url: str | None = None
     assistant_openai_api_key: str | None = None
     assistant_openai_model: str = "gpt-5.4-mini"
+    assistant_input_usd_per_1m_tokens: float = 0.15
+    assistant_output_usd_per_1m_tokens: float = 0.60
+    assistant_rub_per_usd: float = 300.0
     sentry_dsn: str | None = None
     sentry_traces_sample_rate: float = 0.0
     otel_enabled: bool = False

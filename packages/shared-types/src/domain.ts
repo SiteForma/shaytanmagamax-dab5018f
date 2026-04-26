@@ -44,9 +44,11 @@ export type QualityIssueType =
 export type UploadState =
   | "uploaded"
   | "parsing"
+  | "source_confirmation_required"
   | "mapping_required"
   | "validating"
   | "issues_found"
+  | "ready_to_review"
   | "ready_to_apply"
   | "applying"
   | "applied"
@@ -203,6 +205,23 @@ export interface UploadJob {
   canValidate?: boolean;
   canEditMapping?: boolean;
   duplicateOfBatchId?: ID | null;
+  detectedSourceType?: UploadJob["sourceType"];
+  sourceDetection?: UploadSourceDetection | null;
+}
+
+export interface UploadSourceTypeCandidate {
+  sourceType: UploadJob["sourceType"];
+  confidence: number;
+  matchedFields: string[];
+}
+
+export interface UploadSourceDetection {
+  requiresConfirmation: boolean;
+  confirmed: boolean;
+  detectedSourceType: UploadJob["sourceType"];
+  selectedSourceType: UploadJob["sourceType"];
+  candidates: UploadSourceTypeCandidate[];
+  customEntityName?: string | null;
 }
 
 export interface MappingField {
@@ -338,6 +357,8 @@ export type AssistantIntent =
   | "client_summary"
   | "upload_status_summary"
   | "quality_issue_summary"
+  | "management_report_summary"
+  | "free_chat"
   | "unsupported_or_ambiguous";
 
 export type AssistantResponseStatus =
@@ -414,6 +435,14 @@ export interface AssistantFollowupSuggestion {
   route?: string | null;
 }
 
+export interface AssistantTokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  estimatedCostUsd: number;
+  estimatedCostRub: number;
+}
+
 export interface AssistantResponse {
   answerId: ID;
   sessionId?: ID | null;
@@ -429,6 +458,7 @@ export interface AssistantResponse {
   warnings: AssistantWarning[];
   createdAt: string;
   provider?: string;
+  tokenUsage?: AssistantTokenUsage;
   traceId: ID;
   contextUsed: AssistantPinnedContext;
 }
@@ -461,6 +491,8 @@ export interface AssistantSession {
   preferredMode: string;
   provider: string;
   latestTraceId?: string | null;
+  tokenUsage?: AssistantTokenUsage;
+  estimatedCostRub?: number;
 }
 
 export interface AssistantCapabilities {

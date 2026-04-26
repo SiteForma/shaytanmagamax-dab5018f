@@ -16,6 +16,8 @@ AssistantIntent = Literal[
     "client_summary",
     "upload_status_summary",
     "quality_issue_summary",
+    "management_report_summary",
+    "free_chat",
     "unsupported_or_ambiguous",
 ]
 AssistantResponseStatus = Literal[
@@ -141,6 +143,14 @@ class AssistantFollowupSuggestion(ORMModel):
     route: str | None = None
 
 
+class AssistantTokenUsage(ORMModel):
+    input_tokens: int = Field(default=0, alias="inputTokens")
+    output_tokens: int = Field(default=0, alias="outputTokens")
+    total_tokens: int = Field(default=0, alias="totalTokens")
+    estimated_cost_usd: float = Field(default=0.0, alias="estimatedCostUsd")
+    estimated_cost_rub: float = Field(default=0.0, alias="estimatedCostRub")
+
+
 class AssistantResponse(ORMModel):
     answer_id: str = Field(alias="answerId")
     session_id: str | None = Field(default=None, alias="sessionId")
@@ -157,6 +167,7 @@ class AssistantResponse(ORMModel):
     generated_at: str = Field(alias="generatedAt")
     trace_id: str = Field(alias="traceId")
     provider: str
+    token_usage: AssistantTokenUsage = Field(default_factory=AssistantTokenUsage, alias="tokenUsage")
     context_used: AssistantPinnedContext = Field(alias="contextUsed")
 
 
@@ -188,6 +199,8 @@ class AssistantSessionSummary(ORMModel):
     preferred_mode: str = Field(alias="preferredMode")
     provider: str
     latest_trace_id: str | None = Field(default=None, alias="latestTraceId")
+    token_usage: AssistantTokenUsage = Field(default_factory=AssistantTokenUsage, alias="tokenUsage")
+    estimated_cost_rub: float = Field(default=0.0, alias="estimatedCostRub")
 
 
 class AssistantSessionDetail(AssistantSessionSummary):

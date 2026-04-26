@@ -14,7 +14,11 @@ from apps.api.app.modules.assistant.domain import (
     AssistantToolExecution,
     AssistantWarningData,
 )
-from apps.api.app.modules.assistant.providers import finalize_with_provider
+from apps.api.app.modules.assistant.providers import (
+    combine_token_usage,
+    finalize_with_provider,
+    plan_route_with_provider,
+)
 from apps.api.app.modules.assistant.routing import route_question
 from apps.api.app.modules.assistant.schemas import (
     AssistantAnswerSection,
@@ -23,6 +27,7 @@ from apps.api.app.modules.assistant.schemas import (
     AssistantQueryRequest,
     AssistantResponse,
     AssistantSourceRef,
+    AssistantTokenUsage,
     AssistantToolCall,
     AssistantWarning,
 )
@@ -31,6 +36,7 @@ from apps.api.app.modules.assistant.tools import (
     tool_get_client_summary,
     tool_get_dashboard_summary,
     tool_get_inbound_impact,
+    tool_get_management_report,
     tool_get_quality_issues,
     tool_get_sku_summary,
     tool_get_stock_risk,
@@ -43,6 +49,31 @@ def _qty(value: float | int | None) -> str:
     if value is None:
         return "н/д"
     return f"{float(value):.1f}".rstrip("0").rstrip(".")
+
+
+def _money(value: object) -> str:
+    try:
+        numeric = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return "н/д"
+    abs_value = abs(numeric)
+    if abs_value >= 1_000_000_000:
+        return f"{numeric / 1_000_000_000:.2f} млрд"
+    if abs_value >= 1_000_000:
+        return f"{numeric / 1_000_000:.1f} млн"
+    if abs_value >= 1_000:
+        return f"{numeric / 1_000:.1f} тыс."
+    return f"{numeric:.1f}".rstrip("0").rstrip(".")
+
+
+def _metric_value(value: object, unit: str) -> str:
+    if unit == "rub":
+        return f"{_money(value)} ₽"
+    if unit == "pct":
+        return f"{float(value):.2f}".rstrip("0").rstrip(".") + "%"
+    if unit == "ratio":
+        return f"{float(value) * 100:.1f}%"
+    return _qty(float(value))
 
 
 def _localize_status_reason(value: str | None) -> str:
@@ -134,6 +165,27 @@ def _collect_warnings(bundle: AssistantContextBundle, executions: list[Assistant
 
 
 def _generic_followups(intent: str, bundle: AssistantContextBundle) -> list[dict[str, object]]:
+    if intent == "free_chat":
+        return [
+            {
+                "id": "what_can_do",
+                "label": "Что ты умеешь?",
+                "prompt": "Что ты умеешь в этой системе и когда используешь данные?",
+                "action": "query",
+            },
+            {
+                "id": "reserve_example",
+                "label": "Пример по резерву",
+                "prompt": "Покажи пример вопроса для расчёта резерва по клиенту и SKU",
+                "action": "query",
+            },
+            {
+                "id": "data_sources",
+                "label": "Какие данные доступны?",
+                "prompt": "Какие данные и источники сейчас доступны в MAGAMAX?",
+                "action": "query",
+            },
+        ]
     if intent == "reserve_calculation":
         return [
             {
@@ -212,6 +264,21 @@ def _generic_followups(intent: str, bundle: AssistantContextBundle) -> list[dict
                 "route": "/quality",
             },
         ]
+    if intent == "management_report_summary":
+        return [
+            {
+                "id": "departments_revenue",
+                "label": "Выручка подразделений",
+                "prompt": "Покажи выручку и рентабельность по подразделениям за 2025",
+                "action": "query",
+            },
+            {
+                "id": "demand_shortage",
+                "label": "СПРОС / недопоставки",
+                "prompt": "Что известно по спросу и недопоставкам в управленческом отчёте 2025?",
+                "action": "query",
+            },
+        ]
     return [
         {
             "id": "dashboard",
@@ -242,17 +309,20 @@ def _compose_unsupported(bundle: AssistantContextBundle) -> AssistantAnswerDraft
     return AssistantAnswerDraft(
         intent="unsupported_or_ambiguous",
         status="unsupported",
-        confidence=0.35,
-        title="Нужна более предметная постановка вопроса",
-        summary="Ассистент не смог надёжно определить operational intent. Лучше указать клиента, SKU, горизонт расчёта или тип нужной сводки.",
+        confidence=0.95,
+        title="Запрос вне контура MAGAMAX",
+        summary=(
+            "Отказ: Шайтан-машина отвечает только на вопросы, сопряжённые с рабочими данными MAGAMAX, "
+            "загрузками, резервами, SKU, складом, поставками, качеством данных и расчётами по этим данным."
+        ),
         sections=[
             _section(
-                section_type="narrative",
-                title="Что уточнить",
+                section_type="warning_block",
+                title="Что можно спрашивать",
                 items=[
-                    "клиент или DIY-сеть",
-                    "SKU или категорию",
-                    "горизонт резерва или тип сводки",
+                    "состояние загруженных данных, ingestion, mapping и quality issues",
+                    "расчёт и объяснение резерва по клиентам, SKU и категориям",
+                    "склад, покрытие, входящие поставки, дефицит и операционные риски MAGAMAX",
                 ],
             )
         ],
@@ -264,9 +334,80 @@ def _compose_unsupported(bundle: AssistantContextBundle) -> AssistantAnswerDraft
     )
 
 
-def _compose_answer(bundle: AssistantContextBundle, executions: list[AssistantToolExecution]) -> AssistantAnswerDraft:
+def _free_chat_context_items(bundle: AssistantContextBundle) -> list[str]:
+    items: list[str] = []
+    if bundle.context.selected_client_id:
+        items.append(f"Закреплён клиент: {bundle.context.selected_client_id}")
+    if bundle.context.selected_sku_id:
+        items.append(f"Закреплён SKU: {bundle.context.selected_sku_id}")
+    if bundle.context.selected_category_id:
+        items.append(f"Закреплена категория: {bundle.context.selected_category_id}")
+    if bundle.context.selected_reserve_run_id:
+        items.append(f"Закреплён reserve run: {bundle.context.selected_reserve_run_id}")
+    if bundle.context.selected_upload_ids:
+        items.append(f"Закреплены файлы загрузки: {', '.join(bundle.context.selected_upload_ids)}")
+    return items
+
+
+def _compose_free_chat(bundle: AssistantContextBundle, question: str) -> AssistantAnswerDraft:
+    context_items = _free_chat_context_items(bundle)
+    sections = [
+        _section(
+            section_type="narrative",
+            title="Контур MAGAMAX",
+            body=(
+                "Я могу помочь по данным MAGAMAX: загрузкам, товарам, складу, поставкам, резервам и отчётам. "
+                "Задайте вопрос обычными словами."
+            ),
+        )
+    ]
+    if context_items:
+        sections.append(
+            _section(
+                section_type="source_list",
+                title="Контекст сессии",
+                items=context_items,
+            )
+        )
+    sections.append(
+        _section(
+            section_type="next_actions",
+            title="Как получить точный ответ по данным",
+            items=[
+                "Для расчёта укажите клиента и SKU или закрепите их справа в контексте.",
+                "Для объяснения риска спросите: «Почему эта позиция критична?» при выбранном SKU.",
+                "Для данных по поставкам спросите: «Какие inbound поставки снижают дефицит?»",
+            ],
+        )
+    )
+    return AssistantAnswerDraft(
+        intent="free_chat",
+        status="completed",
+        confidence=0.68,
+        title="MAGAMAX AI",
+        summary=(
+            "Могу помочь по данным MAGAMAX. Напишите вопрос обычными словами."
+        ),
+        sections=sections,
+        source_refs=[],
+        tool_calls=[],
+        followups=_generic_followups("free_chat", bundle),
+        warnings=bundle.warnings,
+        context_used=bundle.context,
+        user_text=question,
+    )
+
+
+def _compose_answer(
+    bundle: AssistantContextBundle,
+    executions: list[AssistantToolExecution],
+    *,
+    question: str,
+) -> AssistantAnswerDraft:
     if bundle.route.intent == "unsupported_or_ambiguous":
         return _compose_unsupported(bundle)
+    if bundle.route.intent == "free_chat":
+        return _compose_free_chat(bundle, question)
 
     tool_map = {execution.tool_name: execution for execution in executions}
     warnings = _collect_warnings(bundle, executions)
@@ -742,7 +883,416 @@ def _compose_answer(bundle: AssistantContextBundle, executions: list[AssistantTo
             context_used=bundle.context,
         )
 
+    if bundle.route.intent == "management_report_summary":
+        payload = tool_map["get_management_report"].payload or {}
+        latest = payload.get("latest_import") if isinstance(payload, dict) else None
+        if latest is None:
+            return AssistantAnswerDraft(
+                intent="management_report_summary",
+                status="partial",
+                confidence=0.46,
+                title="Управленческий отчёт не найден",
+                summary="В БД нет импортированного управленческого отчёта, поэтому ответ по цифрам невозможен.",
+                sections=[
+                    _section(
+                        section_type="warning_block",
+                        title="Что нужно сделать",
+                        items=[warning.message for warning in warnings]
+                        or ["Импортируйте XLSX управленческого отчёта."],
+                    )
+                ],
+                source_refs=source_refs,
+                tool_calls=executions,
+                followups=_generic_followups("management_report_summary", bundle),
+                warnings=warnings,
+                context_used=bundle.context,
+            )
+
+        summary_payload = payload.get("summary")
+        metrics = payload.get("metrics") or []
+        answer_focus = payload.get("answer_focus") if isinstance(payload, dict) else None
+        key_metrics = getattr(summary_payload, "key_metrics", []) if summary_payload else []
+        organization_units = getattr(summary_payload, "organization_units", []) if summary_payload else []
+        metric_counts_by_sheet = getattr(summary_payload, "metric_counts_by_sheet", {}) if summary_payload else {}
+        if isinstance(answer_focus, dict) and answer_focus.get("kind") == "top_product_group_earnings":
+            year = answer_focus.get("year") or "выбранный год"
+            ranked_rows = answer_focus.get("rows") if isinstance(answer_focus.get("rows"), list) else []
+            try:
+                requested_rank = max(int(answer_focus.get("requestedRank") or 1), 1)
+            except (TypeError, ValueError):
+                requested_rank = 1
+            selected_row = ranked_rows[requested_rank - 1] if len(ranked_rows) >= requested_rank else None
+            metric_rows = [
+                {
+                    "rank": index + 1,
+                    "dimensionName": item.get("dimensionName"),
+                    "estimatedProfit": _metric_value(item.get("estimatedProfitRub"), "rub"),
+                    "revenue": _metric_value(item.get("revenue"), "rub"),
+                    "profitability": _metric_value(item.get("profitabilityPct"), "pct"),
+                    "metricYear": item.get("metricYear") or "—",
+                }
+                for index, item in enumerate(ranked_rows[:8])
+                if isinstance(item, dict)
+            ]
+            if isinstance(selected_row, dict):
+                if requested_rank == 1:
+                    summary_text = (
+                        f"Если считать заработок как выручка × рентабельность, то в {year} больше всего "
+                        f"заработали на товарной группе {selected_row.get('dimensionName')}: "
+                        f"{_metric_value(selected_row.get('estimatedProfitRub'), 'rub')}."
+                    )
+                else:
+                    summary_text = (
+                        f"{requested_rank}-е место по расчётному заработку в {year}: "
+                        f"{selected_row.get('dimensionName')} — "
+                        f"{_metric_value(selected_row.get('estimatedProfitRub'), 'rub')}."
+                    )
+            else:
+                summary_text = (
+                    f"В управленческом отчёте нет {requested_rank}-го места по расчётному заработку за {year}."
+                )
+            sections = [
+                _section(
+                    section_type="narrative",
+                    title="Ответ",
+                    body=summary_text,
+                ),
+                _section(
+                    section_type="reserve_table_preview",
+                    title=f"Топ товарных групп по расчётному заработку, {year}",
+                    rows=metric_rows,
+                ),
+                _section(
+                    section_type="warning_block",
+                    title="Как считал",
+                    items=[
+                        "В загруженном отчёте нет прямой прибыли в рублях по конкретным товарам.",
+                        "Поэтому запрос 'на каком товаре заработали больше всего' считается на уровне товарных групп как выручка × рентабельность, %.",
+                    ],
+                ),
+            ]
+            return AssistantAnswerDraft(
+                intent="management_report_summary",
+                status="completed" if selected_row is not None else "partial",
+                confidence=0.9 if selected_row is not None else 0.62,
+                title=f"Где заработали больше всего в {year}"
+                if requested_rank == 1
+                else f"{requested_rank}-е место по заработку, {year}",
+                summary=summary_text,
+                sections=sections,
+                source_refs=source_refs,
+                tool_calls=executions,
+                followups=_generic_followups("management_report_summary", bundle),
+                warnings=warnings,
+                context_used=bundle.context,
+            )
+
+        if isinstance(answer_focus, dict) and answer_focus.get("kind") == "top_product_group_profitability":
+            year = answer_focus.get("year") or "выбранный год"
+            try:
+                requested_rank = max(int(answer_focus.get("requestedRank") or 1), 1)
+            except (TypeError, ValueError):
+                requested_rank = 1
+            selected_metric = metrics[requested_rank - 1] if len(metrics) >= requested_rank else None
+            metric_rows = [
+                {
+                    "rank": index + 1,
+                    "dimensionName": item.dimension_name,
+                    "profitability": _metric_value(item.metric_value, item.metric_unit),
+                    "metricYear": item.metric_year or "—",
+                }
+                for index, item in enumerate(metrics[:8])
+            ]
+            if selected_metric is not None:
+                selected_value = _metric_value(selected_metric.metric_value, selected_metric.metric_unit)
+                if requested_rank == 1:
+                    summary_text = (
+                        f"По рентабельности в {year} самая выгодная товарная группа — "
+                        f"{selected_metric.dimension_name}: {selected_value}."
+                    )
+                else:
+                    summary_text = (
+                        f"{requested_rank}-е место по рентабельности в {year}: "
+                        f"{selected_metric.dimension_name} — {selected_value}."
+                    )
+            else:
+                summary_text = (
+                    f"В управленческом отчёте нет {requested_rank}-го места по рентабельности товарных групп за {year}."
+                )
+            sections = [
+                _section(
+                    section_type="narrative",
+                    title="Ответ",
+                    body=summary_text,
+                ),
+                _section(
+                    section_type="reserve_table_preview",
+                    title=f"Топ товарных групп по рентабельности, {year}",
+                    rows=metric_rows,
+                ),
+                _section(
+                    section_type="warning_block",
+                    title="Как трактовать",
+                    items=[
+                        "Запрос 'самая выгодная ТГ' трактуется как максимум рентабельности, %.",
+                        "Это не ранжирование по абсолютной прибыли в рублях: такой метрики в текущем импорте нет.",
+                    ],
+                ),
+            ]
+            return AssistantAnswerDraft(
+                intent="management_report_summary",
+                status="completed" if selected_metric is not None else "partial",
+                confidence=0.91 if selected_metric is not None else 0.62,
+                title=f"Самая выгодная ТГ в {year}"
+                if requested_rank == 1
+                else f"{requested_rank}-е место по рентабельности ТГ, {year}",
+                summary=summary_text,
+                sections=sections,
+                source_refs=source_refs,
+                tool_calls=executions,
+                followups=_generic_followups("management_report_summary", bundle),
+                warnings=warnings,
+                context_used=bundle.context,
+            )
+
+        top_key_metrics = [
+            _metric(
+                f"key_{index}",
+                item.label,
+                _metric_value(item.value, item.unit),
+                "positive" if item.unit in {"rub", "ratio"} else "neutral",
+            )
+            for index, item in enumerate(key_metrics[:4])
+        ]
+        metric_rows = [
+            {
+                "sheetName": item.sheet_name,
+                "dimensionName": item.dimension_name,
+                "metricName": item.metric_name,
+                "metricYear": item.metric_year or "—",
+                "metricValue": _metric_value(item.metric_value, item.metric_unit),
+            }
+            for item in metrics[:8]
+        ]
+        sections = [
+            _section(
+                section_type="narrative",
+                title="Что загружено",
+                body=(
+                    f"В БД подключён управленческий отчёт {latest.file_name}: "
+                    f"{latest.raw_row_count} raw-строк, {latest.metric_count} нормализованных метрик, "
+                    f"{len(organization_units)} подразделения. Эти данные используются как отдельный контекст, "
+                    "не как SKU/reserve facts."
+                ),
+            ),
+            _section(
+                section_type="metric_summary",
+                title="Ключевые показатели отчёта",
+                metrics=top_key_metrics,
+            ),
+            _section(
+                section_type="reserve_table_preview",
+                title="Релевантные строки по вопросу",
+                rows=metric_rows,
+            ),
+            _section(
+                section_type="source_list",
+                title="Покрытие листов",
+                items=[
+                    f"{sheet}: {count} метрик"
+                    for sheet, count in sorted(metric_counts_by_sheet.items())
+                ],
+            ),
+        ]
+        return AssistantAnswerDraft(
+            intent="management_report_summary",
+            status="completed" if metrics or key_metrics else "partial",
+            confidence=0.87 if metrics or key_metrics else 0.65,
+            title="Управленческий отчёт MAGAMAX",
+            summary=sections[0]["body"] or "",
+            sections=sections,
+            source_refs=source_refs,
+            tool_calls=executions,
+            followups=_generic_followups("management_report_summary", bundle),
+            warnings=warnings,
+            context_used=bundle.context,
+        )
+
     return _compose_unsupported(bundle)
+
+
+FOLLOWUP_DETAIL_TOKENS = (
+    "подробнее",
+    "подробней",
+    "развернут",
+    "развёрнут",
+    "детал",
+    "расшифр",
+    "покажи строки",
+    "покажи таблицу",
+    "дай данные",
+    "больше данных",
+)
+
+FOLLOWUP_CONTEXT_TOKENS = (
+    "второе место",
+    "второй",
+    "вторая",
+    "вторую",
+    "2 место",
+    "2-е место",
+    "третье место",
+    "третий",
+    "третья",
+    "3 место",
+    "3-е место",
+    "следующее",
+    "следующий",
+    "следующая",
+    "кто дальше",
+    "что дальше",
+    "а дальше",
+)
+
+FOLLOWUP_REPAIR_TOKENS = (
+    "теперь ответ",
+    "теперь ответишь",
+    "ответишь",
+    "ответь",
+    "попробуй",
+    "попробуй еще",
+    "попробуй ещё",
+    "еще раз",
+    "ещё раз",
+    "ну а теперь",
+)
+
+
+def _last_domain_history_item(history: list[dict[str, object]]) -> dict[str, object] | None:
+    for item in reversed(history):
+        intent = str(item.get("intent") or "")
+        if item.get("role") == "assistant" and intent not in {
+            "",
+            "free_chat",
+            "unsupported_or_ambiguous",
+        }:
+            return item
+    return None
+
+
+def _previous_user_text(history: list[dict[str, object]]) -> str | None:
+    for item in reversed(history):
+        if item.get("role") == "user":
+            text = str(item.get("text") or "").strip()
+            if text:
+                return text
+    return None
+
+
+def _previous_domain_tool_question(item: dict[str, object] | None) -> str | None:
+    if item is None:
+        return None
+    tool_calls = item.get("toolCalls")
+    if not isinstance(tool_calls, list):
+        return None
+    for tool_call in reversed(tool_calls):
+        if not isinstance(tool_call, dict):
+            continue
+        arguments = tool_call.get("arguments")
+        if not isinstance(arguments, dict):
+            continue
+        question = str(arguments.get("question") or "").strip()
+        if question:
+            return question
+    return None
+
+
+def _previous_substantive_domain_tool_question(history: list[dict[str, object]]) -> str | None:
+    for item in reversed(history):
+        intent = str(item.get("intent") or "")
+        if item.get("role") != "assistant" or intent in {
+            "",
+            "free_chat",
+            "unsupported_or_ambiguous",
+        }:
+            continue
+        question = _previous_domain_tool_question(item)
+        if not question:
+            continue
+        # Skip repair/meta questions that accidentally produced a generic domain answer.
+        if _is_repair_followup_request(question) or len(question.strip()) < 30:
+            continue
+        return question
+    return None
+
+
+def _previous_contextual_user_text(history: list[dict[str, object]]) -> str | None:
+    for item in reversed(history):
+        if item.get("role") != "user":
+            continue
+        text = str(item.get("text") or "").strip()
+        if text and _is_contextual_followup_request(text):
+            return text
+    return None
+
+
+def _is_followup_detail_request(question: str) -> bool:
+    q = question.lower()
+    return any(token in q for token in FOLLOWUP_DETAIL_TOKENS)
+
+
+def _is_contextual_followup_request(question: str) -> bool:
+    q = question.lower().strip()
+    return _is_followup_detail_request(q) or any(token in q for token in FOLLOWUP_CONTEXT_TOKENS)
+
+
+def _is_repair_followup_request(question: str) -> bool:
+    q = question.lower().strip()
+    return any(token in q for token in FOLLOWUP_REPAIR_TOKENS)
+
+
+def _apply_history_fallback_plan(
+    *,
+    question: str,
+    deterministic_intent: str,
+    planned_intent: str | None,
+    planned_tool_question: str | None,
+    history: list[dict[str, object]],
+) -> tuple[str, str]:
+    intent = planned_intent or deterministic_intent
+    tool_question = planned_tool_question or question
+
+    if (
+        deterministic_intent not in {"free_chat", "unsupported_or_ambiguous"}
+        and intent == "unsupported_or_ambiguous"
+    ):
+        intent = deterministic_intent
+        tool_question = question
+
+    previous_user_text = _previous_user_text(history)
+    previous_contextual_user_text = _previous_contextual_user_text(history)
+    should_repair_previous_followup = (
+        _is_repair_followup_request(question)
+        and previous_contextual_user_text is not None
+    )
+    should_apply_context = _is_contextual_followup_request(question) or should_repair_previous_followup
+
+    if (
+        deterministic_intent in {"free_chat", "unsupported_or_ambiguous"}
+        and should_apply_context
+    ):
+        previous_domain = _last_domain_history_item(history)
+        if previous_domain is not None:
+            intent = str(previous_domain.get("intent") or intent)
+            base_question = (
+                _previous_substantive_domain_tool_question(history)
+                or _previous_domain_tool_question(previous_domain)
+                or _previous_user_text(history)
+            )
+            semantic_followup = previous_contextual_user_text if should_repair_previous_followup else question
+            if base_question:
+                tool_question = f"{base_question}. Follow-up: {semantic_followup}"
+    return intent, tool_question
 
 
 def _tool_plan(intent: str) -> list[str]:
@@ -756,8 +1306,35 @@ def _tool_plan(intent: str) -> list[str]:
         "stock_risk_summary": ["get_stock_coverage", "get_dashboard_summary"],
         "upload_status_summary": ["get_upload_status", "get_dashboard_summary", "get_quality_issues"],
         "quality_issue_summary": ["get_quality_issues", "get_upload_status"],
+        "management_report_summary": ["get_management_report"],
     }
     return plans.get(intent, [])
+
+
+def _execution_plan(intent: str, planned_tool_names: list[str]) -> list[str]:
+    """Keep required tools deterministic, while allowing LLM to add safe support tools."""
+    required = _tool_plan(intent)
+    if intent in {"free_chat", "unsupported_or_ambiguous"}:
+        return []
+    allowed = set(required)
+    if intent in {
+        "reserve_calculation",
+        "reserve_explanation",
+        "sku_summary",
+        "client_summary",
+        "diy_coverage_check",
+        "inbound_impact",
+        "stock_risk_summary",
+    }:
+        allowed.update({"get_quality_issues", "get_upload_status", "get_dashboard_summary"})
+    if intent == "management_report_summary":
+        allowed.update({"get_upload_status", "get_quality_issues"})
+
+    plan = list(required)
+    for tool_name in planned_tool_names:
+        if tool_name in allowed and tool_name not in plan:
+            plan.append(tool_name)
+    return plan
 
 
 def execute_assistant_query(
@@ -766,14 +1343,34 @@ def execute_assistant_query(
     *,
     payload: AssistantQueryRequest,
     created_by_id: str | None,
+    history: list[dict[str, object]] | None = None,
 ) -> AssistantResponse:
     trace_id = generate_id("trace")
     question = payload.prompt_text()
-    route = route_question(db, question)
+    history_items = history or []
+    deterministic_route = route_question(db, question)
+    plan = plan_route_with_provider(
+        settings,
+        question=question,
+        deterministic_intent=deterministic_route.intent,
+        history=history_items,
+    )
+    planned_intent, tool_question = _apply_history_fallback_plan(
+        question=question,
+        deterministic_intent=deterministic_route.intent,
+        planned_intent=plan.intent,
+        planned_tool_question=plan.tool_question,
+        history=history_items,
+    )
+    route = route_question(
+        db,
+        tool_question,
+        forced_intent=planned_intent,  # type: ignore[arg-type]
+    )
     bundle = build_context_bundle(db, route=route, pinned_context=payload.context)
 
     executions: list[AssistantToolExecution] = []
-    for tool_name in _tool_plan(route.intent):
+    for tool_name in _execution_plan(route.intent, plan.tool_names):
         if tool_name == "calculate_reserve":
             executions.append(tool_calculate_reserve(db, bundle, created_by_id=created_by_id))
         elif tool_name == "get_reserve_explanation":
@@ -792,9 +1389,12 @@ def execute_assistant_query(
             executions.append(tool_get_quality_issues(db, bundle))
         elif tool_name == "get_dashboard_summary":
             executions.append(tool_get_dashboard_summary(db))
+        elif tool_name == "get_management_report":
+            executions.append(tool_get_management_report(db, tool_question))
 
-    draft = _compose_answer(bundle, executions)
-    draft, provider_name, _provider_warnings = finalize_with_provider(settings, draft)
+    draft = _compose_answer(bundle, executions, question=question)
+    draft, provider_name, _provider_warnings, finalize_usage = finalize_with_provider(settings, draft)
+    token_usage = combine_token_usage(plan.token_usage, finalize_usage)
 
     return AssistantResponse(
         answerId=generate_id("ans"),
@@ -828,5 +1428,12 @@ def execute_assistant_query(
         generatedAt=utc_now().isoformat(),
         traceId=trace_id,
         provider=provider_name,
+        tokenUsage=AssistantTokenUsage(
+            inputTokens=token_usage.input_tokens,
+            outputTokens=token_usage.output_tokens,
+            totalTokens=token_usage.total_tokens,
+            estimatedCostUsd=token_usage.estimated_cost_usd,
+            estimatedCostRub=token_usage.estimated_cost_rub,
+        ),
         contextUsed=_context_schema(draft.context_used),
     )

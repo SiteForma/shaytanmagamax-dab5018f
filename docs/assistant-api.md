@@ -102,6 +102,12 @@ Request:
 - session support;
 - pinned context support.
 
+`free_chat` входит в supported intents, но это доменный чат MAGAMAX, а не общий ChatGPT-режим.
+Он используется только для вопросов о работе с MAGAMAX, загруженными данными, резервами, SKU,
+складом, поставками, качеством данных, dashboard и возможностями самой консоли.
+Внешние темы возвращают `unsupported_or_ambiguous` с отказом. Если LLM-provider включён, planner может быть вызван
+только для классификации запроса; domain tools при отказе не запускаются.
+
 ### `GET /prompts/suggestions`
 
 Возвращает UI-ready prompt suggestions.
@@ -144,6 +150,23 @@ Frontend использует `PATCH /sessions/{id}` для:
 - `traceId`
 - `provider`
 - `contextUsed`
+
+Для `intent: "free_chat"` поле `toolCalls` обычно пустое, а `sourceRefs` может быть пустым.
+Это означает, что ответ был доменным conversational-ответом и не использовал operational data sources.
+
+Для `intent: "unsupported_or_ambiguous"` backend возвращает детерминированный отказ:
+Шайтан-машина отвечает только на вопросы, сопряжённые с рабочими данными MAGAMAX.
+
+## Orchestration Order
+
+При включённом LLM-provider запрос проходит так:
+
+1. LLM planner интерпретирует текст и выбирает intent + allowlisted tools.
+2. Backend выполняет только валидированные domain tools по БД.
+3. Backend собирает structured response с source refs.
+4. LLM finalizer, если доступен, улучшает текст без права менять факты.
+
+Если provider отключён или недоступен, используется deterministic router + deterministic answer composition.
 
 ## Source References
 

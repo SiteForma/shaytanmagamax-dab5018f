@@ -1,8 +1,32 @@
 # Assistant Intents
 
-Phase 5 поддерживает rules-first routing с typed intents.
+Phase 5 поддерживает typed intents с LLM-first orchestration при включённом provider и deterministic fallback.
 
 ## Supported Intents
+
+### `free_chat`
+
+Доменный свободный чат для вопросов о MAGAMAX и о том, как пользоваться AI Console.
+Это не общий ChatGPT-режим: внешние темы должны возвращать `unsupported_or_ambiguous`.
+
+Примеры:
+
+- `Привет, как с тобой лучше работать в MAGAMAX?`
+- `Объясни, какие вопросы сюда можно задавать`
+- `Помоги сформулировать запрос для расчёта резерва`
+
+Primary tools:
+
+- none by default
+
+Поведение:
+
+- не запускает доменные расчёты случайно;
+- не добавляет операционные цифры без вызова реальных инструментов;
+- может использовать pinned context как conversational context;
+- если вопрос требует фактов, предлагает сформулировать операционный запрос, который будет направлен в соответствующий intent.
+- если вопрос не связан с MAGAMAX, загруженными данными, резервами, SKU, складом, поставками,
+  качеством данных или расчётами по этим данным, возвращается жёсткий отказ.
 
 ### `reserve_calculation`
 
@@ -129,10 +153,8 @@ Primary tools:
 
 Используется, когда:
 
-- intent не определён уверенно;
-- вопрос слишком общий;
-- нет enough entity signal;
-- pinned context не помогает.
+- сообщение пустое или непригодное для обработки;
+- запрос повреждён или не содержит текста.
 
 Response strategy:
 
@@ -142,12 +164,19 @@ Response strategy:
 
 ## Routing Strategy
 
-Роутинг идёт не через prompt magic, а через:
+Роутинг устроен как контролируемая оркестрация, а не как свободный prompt:
 
-1. deterministic intent detection;
-2. extraction of entities;
-3. merge with pinned context;
-4. warning emission on ambiguity or conflicts.
+1. deterministic router делает быстрый baseline intent и извлечение сущностей;
+2. если `openai_compatible` включён, LLM planner первым интерпретирует запрос и выбирает `intent`, `toolQuestion`, `toolNames`;
+3. backend валидирует intent/tools по allowlist и не даёт LLM выполнять произвольные действия;
+4. backend повторно извлекает сущности из `toolQuestion`;
+5. контекст вопроса объединяется с pinned context;
+6. запускаются только разрешённые domain tools, которые читают данные из БД и вызывают реальные сервисы;
+7. ответ собирается из tool outputs и source refs;
+8. LLM finalizer может улучшить язык ответа, но не менять факты, метрики и источники;
+9. если вопрос вне MAGAMAX, возвращается `unsupported_or_ambiguous` без запуска domain tools.
+
+Важная гарантия: если deterministic router уверенно нашёл доменный intent, LLM planner не может понизить его до `unsupported_or_ambiguous`.
 
 ## Pinned Context Override
 

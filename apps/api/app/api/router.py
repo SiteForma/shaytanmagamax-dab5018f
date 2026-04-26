@@ -14,6 +14,7 @@ from apps.api.app.modules.health.router import router as health_router
 from apps.api.app.modules.inbound.router import router as inbound_router
 from apps.api.app.modules.mapping.router import router as mapping_router
 from apps.api.app.modules.quality.router import router as quality_router
+from apps.api.app.modules.reports.router import router as reports_router
 from apps.api.app.modules.reserve.router import router as reserve_router
 from apps.api.app.modules.sales.router import router as sales_router
 from apps.api.app.modules.stock.router import router as stock_router
@@ -47,6 +48,7 @@ _include_protected_router(reserve_router, resource="reserve")
 _include_protected_router(mapping_router, resource="mapping")
 _include_protected_router(uploads_router, resource="uploads")
 _include_protected_router(quality_router, resource="quality")
+_include_protected_router(reports_router, resource="dashboard")
 _include_protected_router(assistant_router, resource="assistant", action="query")
 
 # Mixed-capability surfaces keep route-level capability checks, but still require authentication globally.

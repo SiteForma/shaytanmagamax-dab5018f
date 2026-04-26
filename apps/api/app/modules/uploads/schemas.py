@@ -20,6 +20,26 @@ class UploadReadinessResponse(ORMModel):
     can_edit_mapping: bool
 
 
+class UploadSourceTypeCandidateResponse(ORMModel):
+    source_type: str
+    confidence: float
+    matched_fields: list[str] = Field(default_factory=list)
+
+
+class UploadSourceDetectionResponse(ORMModel):
+    requires_confirmation: bool
+    confirmed: bool
+    detected_source_type: str
+    selected_source_type: str
+    candidates: list[UploadSourceTypeCandidateResponse] = Field(default_factory=list)
+    custom_entity_name: str | None = None
+
+
+class UploadSourceTypeUpdateRequest(ORMModel):
+    source_type: str
+    new_entity_name: str | None = None
+
+
 class UploadJobRunResponse(ORMModel):
     id: str
     job_name: str
@@ -86,6 +106,7 @@ class UploadFileSummaryResponse(ORMModel):
     duplicate_of_batch_id: str | None = None
     is_duplicate: bool = False
     readiness: UploadReadinessResponse
+    source_detection: UploadSourceDetectionResponse | None = None
 
 
 class UploadFileDetailResponse(ORMModel):

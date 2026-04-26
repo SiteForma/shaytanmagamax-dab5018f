@@ -92,6 +92,20 @@ export async function createUploadJob(file: File, sourceType?: UploadJob["source
   return uploadFileDetailApiToViewModel(response);
 }
 
+export async function confirmUploadSourceType(
+  fileId: string,
+  payload: {
+    sourceType: UploadJob["sourceType"];
+    newEntityName?: string;
+  },
+): Promise<UploadFileDetail> {
+  const response = await api.post<any>(`/uploads/files/${fileId}/source-type`, {
+    source_type: payload.sourceType,
+    new_entity_name: payload.newEntityName,
+  });
+  return uploadFileDetailApiToViewModel(response);
+}
+
 export async function suggestMappingForUpload(
   fileId: string,
   templateId?: string,

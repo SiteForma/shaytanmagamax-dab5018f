@@ -102,6 +102,7 @@ const MESSAGE_LABELS: Record<string, string> = {
   "Upload applied with warnings": "Загрузка применена с предупреждениями",
   "Upload applied successfully": "Загрузка успешно применена",
   "Raw report is available for review": "Сырой отчёт готов к просмотру",
+  "Source type detected automatically and awaits confirmation": "Тип данных распознан автоматически и ожидает подтверждения",
   "Required canonical fields are missing": "Не хватает обязательных канонических полей",
   "Auto-validating mapped upload": "Запускаем автопроверку сопоставленной загрузки",
   "Applying normalized data": "Применяем нормализованные данные",

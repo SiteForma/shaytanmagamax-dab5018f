@@ -2,7 +2,7 @@ import type { ApiErrorEnvelope } from "../../../../../packages/shared-contracts/
 import { DEV_USER_ID } from "@/lib/auth/config";
 import { getStoredSession } from "@/lib/api/session";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000/api";
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8001/api";
 
 export class ApiError extends Error {
   code: string;
@@ -151,6 +151,11 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify(body),
       headers: { "Content-Type": "application/json", ...(options?.headers ?? {}) },
+    }),
+  delete: <T>(path: string, options?: Omit<RequestOptions, "method" | "body">) =>
+    request<T>(path, {
+      ...options,
+      method: "DELETE",
     }),
   download: (path: string, options?: Omit<RequestOptions, "method" | "body">) => download(path, options),
 };

@@ -20,6 +20,7 @@ function normalizePinnedContext(payload: any): AssistantPinnedContext {
 }
 
 export function assistantResponseApiToViewModel(response: any): AssistantResponse {
+  const tokenUsage = response.tokenUsage ?? response.token_usage ?? {};
   return {
     answerId: response.answerId ?? response.answer_id ?? response.id,
     sessionId: response.sessionId ?? response.session_id ?? null,
@@ -35,6 +36,13 @@ export function assistantResponseApiToViewModel(response: any): AssistantRespons
     warnings: response.warnings ?? [],
     createdAt: response.generatedAt ?? response.generated_at ?? response.createdAt ?? response.created_at,
     provider: response.provider ?? "deterministic",
+    tokenUsage: {
+      inputTokens: tokenUsage.inputTokens ?? tokenUsage.input_tokens ?? 0,
+      outputTokens: tokenUsage.outputTokens ?? tokenUsage.output_tokens ?? 0,
+      totalTokens: tokenUsage.totalTokens ?? tokenUsage.total_tokens ?? 0,
+      estimatedCostUsd: tokenUsage.estimatedCostUsd ?? tokenUsage.estimated_cost_usd ?? 0,
+      estimatedCostRub: tokenUsage.estimatedCostRub ?? tokenUsage.estimated_cost_rub ?? 0,
+    },
     traceId: response.traceId ?? response.trace_id ?? "",
     contextUsed: normalizePinnedContext(response.contextUsed ?? response.context_used ?? {}),
   };
@@ -58,6 +66,7 @@ export function assistantMessageApiToViewModel(message: any): AssistantMessage {
 }
 
 export function assistantSessionApiToViewModel(session: any): AssistantSession {
+  const tokenUsage = session.tokenUsage ?? session.token_usage ?? {};
   return {
     id: session.id,
     title: session.title,
@@ -71,6 +80,14 @@ export function assistantSessionApiToViewModel(session: any): AssistantSession {
     preferredMode: session.preferredMode ?? session.preferred_mode ?? "deterministic",
     provider: session.provider ?? "deterministic",
     latestTraceId: session.latestTraceId ?? session.latest_trace_id ?? null,
+    tokenUsage: {
+      inputTokens: tokenUsage.inputTokens ?? tokenUsage.input_tokens ?? 0,
+      outputTokens: tokenUsage.outputTokens ?? tokenUsage.output_tokens ?? 0,
+      totalTokens: tokenUsage.totalTokens ?? tokenUsage.total_tokens ?? 0,
+      estimatedCostUsd: tokenUsage.estimatedCostUsd ?? tokenUsage.estimated_cost_usd ?? 0,
+      estimatedCostRub: tokenUsage.estimatedCostRub ?? tokenUsage.estimated_cost_rub ?? session.estimatedCostRub ?? session.estimated_cost_rub ?? 0,
+    },
+    estimatedCostRub: session.estimatedCostRub ?? session.estimated_cost_rub ?? tokenUsage.estimatedCostRub ?? tokenUsage.estimated_cost_rub ?? 0,
   };
 }
 

@@ -151,7 +151,14 @@ SOURCE_TYPE_SPECS: dict[str, SourceTypeSpec] = {
                 "свободный остаток",
                 "остаток свободный",
             ),
-            "warehouse_name": ("warehouse", "warehouse code", "склад"),
+            "warehouse_name": (
+                "warehouse",
+                "warehouse code",
+                "склад",
+                "подразделение",
+                "department",
+                "division",
+            ),
         },
     ),
     "diy_clients": SourceTypeSpec(
@@ -236,17 +243,37 @@ def source_supports_apply(source_type: str) -> bool:
 def detect_source_type(columns: list[str], explicit_source_type: str | None) -> str:
     if explicit_source_type:
         return explicit_source_type
-    best_source_type = "raw_report"
-    best_score = -1.0
+    candidates = rank_source_type_candidates(columns)
+    return candidates[0]["source_type"] if candidates else "raw_report"
+
+
+def rank_source_type_candidates(columns: list[str]) -> list[dict[str, object]]:
+    ranked: list[dict[str, object]] = []
+    meaningful_columns = [str(column) for column in columns if str(column).strip()]
+    if not meaningful_columns:
+        return [{"source_type": "raw_report", "confidence": 0.0, "matched_fields": []}]
     for source_type, _spec in SOURCE_TYPE_SPECS.items():
         score = 0.0
-        for column in columns:
-            _, confidence, _ = suggest_canonical_field(str(column), source_type)
+        matched_fields: set[str] = set()
+        for column in meaningful_columns:
+            canonical, confidence, _ = suggest_canonical_field(str(column), source_type)
             score += confidence
-        if score > best_score:
-            best_score = score
-            best_source_type = source_type
-    return best_source_type
+            if canonical and confidence >= 0.62:
+                matched_fields.add(canonical)
+        ranked.append(
+            {
+                "source_type": source_type,
+                "confidence": round(min(score / max(len(meaningful_columns), 1), 1.0), 2),
+                "matched_fields": sorted(matched_fields),
+            }
+        )
+    ranked.sort(
+        key=lambda item: (float(item["confidence"]), len(item["matched_fields"])),  # type: ignore[arg-type]
+        reverse=True,
+    )
+    if not ranked or float(ranked[0]["confidence"]) < 0.25:
+        return [{"source_type": "raw_report", "confidence": 0.0, "matched_fields": []}, *ranked[:4]]
+    return ranked[:5]
 
 
 def _canonical_tokens(source_type: str, canonical_field: str) -> set[str]:

@@ -11,6 +11,7 @@ from apps.api.app.modules.assistant.schemas import (
     AssistantPinnedContext,
     AssistantResponse,
     AssistantSessionSummary,
+    AssistantTokenUsage,
 )
 
 
@@ -52,6 +53,37 @@ def list_sessions(db: Session, *, user_id: str | None) -> list[AssistantSession]
     if user_id:
         stmt = stmt.where(AssistantSession.created_by_id == user_id)
     return db.scalars(stmt).all()
+
+
+def summarize_session_token_usage(db: Session, session_id: str) -> AssistantTokenUsage:
+    messages = db.scalars(
+        select(AssistantMessage).where(
+            AssistantMessage.session_id == session_id,
+            AssistantMessage.role == "assistant",
+        )
+    ).all()
+    input_tokens = 0
+    output_tokens = 0
+    total_tokens = 0
+    cost_usd = 0.0
+    cost_rub = 0.0
+    for message in messages:
+        response = message.response_payload or {}
+        usage = response.get("tokenUsage") if isinstance(response, dict) else None
+        if not isinstance(usage, dict):
+            continue
+        input_tokens += int(usage.get("inputTokens") or usage.get("input_tokens") or 0)
+        output_tokens += int(usage.get("outputTokens") or usage.get("output_tokens") or 0)
+        total_tokens += int(usage.get("totalTokens") or usage.get("total_tokens") or 0)
+        cost_usd += float(usage.get("estimatedCostUsd") or usage.get("estimated_cost_usd") or 0)
+        cost_rub += float(usage.get("estimatedCostRub") or usage.get("estimated_cost_rub") or 0)
+    return AssistantTokenUsage(
+        inputTokens=input_tokens,
+        outputTokens=output_tokens,
+        totalTokens=total_tokens,
+        estimatedCostUsd=round(cost_usd, 8),
+        estimatedCostRub=round(cost_rub, 4),
+    )
 
 
 def get_session(db: Session, session_id: str, *, user_id: str | None) -> AssistantSession:
@@ -117,6 +149,17 @@ def update_session(
     db.commit()
     db.refresh(session)
     return session
+
+
+def delete_session(
+    db: Session,
+    session_id: str,
+    *,
+    user_id: str | None,
+) -> None:
+    session = _session_or_404(db, session_id, user_id=user_id)
+    db.delete(session)
+    db.commit()
 
 
 def append_user_message(
@@ -211,7 +254,12 @@ def serialize_message(message: AssistantMessage) -> AssistantMessageResponse:
     )
 
 
-def serialize_session(session: AssistantSession) -> AssistantSessionSummary:
+def serialize_session(
+    session: AssistantSession,
+    *,
+    token_usage: AssistantTokenUsage | None = None,
+) -> AssistantSessionSummary:
+    usage = token_usage or AssistantTokenUsage()
     return AssistantSessionSummary(
         id=session.id,
         title=session.title,
@@ -225,4 +273,6 @@ def serialize_session(session: AssistantSession) -> AssistantSessionSummary:
         preferredMode=session.preferred_mode,
         provider=session.provider,
         latestTraceId=session.latest_trace_id,
+        tokenUsage=usage,
+        estimatedCostRub=usage.estimated_cost_rub,
     )

@@ -10,6 +10,7 @@ const useAssistantContextOptionsQuery = vi.fn();
 const useCreateAssistantSessionMutation = vi.fn();
 const useAssistantMessageMutation = vi.fn();
 const useUpdateAssistantSessionMutation = vi.fn();
+const useDeleteAssistantSessionMutation = vi.fn();
 
 vi.mock("@/hooks/queries/use-assistant", () => ({
   useAssistantSessionsQuery: () => useAssistantSessionsQuery(),
@@ -23,6 +24,7 @@ vi.mock("@/hooks/mutations/use-assistant", () => ({
   useCreateAssistantSessionMutation: () => useCreateAssistantSessionMutation(),
   useAssistantMessageMutation: () => useAssistantMessageMutation(),
   useUpdateAssistantSessionMutation: () => useUpdateAssistantSessionMutation(),
+  useDeleteAssistantSessionMutation: () => useDeleteAssistantSessionMutation(),
 }));
 
 describe("AiConsolePage", () => {
@@ -35,6 +37,7 @@ describe("AiConsolePage", () => {
     useCreateAssistantSessionMutation.mockReset();
     useAssistantMessageMutation.mockReset();
     useUpdateAssistantSessionMutation.mockReset();
+    useDeleteAssistantSessionMutation.mockReset();
   });
 
   function mockBaseQueries() {
@@ -42,13 +45,19 @@ describe("AiConsolePage", () => {
       data: {
         provider: "deterministic",
         deterministicFallback: true,
-        intents: [{ key: "reserve_calculation", label: "Расчёт резерва", supported: true }],
+        intents: [
+          { key: "free_chat", label: "MAGAMAX AI", supported: true },
+          { key: "reserve_calculation", label: "Расчёт резерва", supported: true },
+        ],
         sessionSupport: true,
         pinnedContextSupport: true,
       },
     });
     useAssistantPromptSuggestionsQuery.mockReturnValue({
-      data: [{ id: "prompt_1", label: "Расчёт резерва", prompt: "Рассчитай резерв", intent: "reserve_calculation" }],
+      data: [
+        { id: "prompt_0", label: "Возможности консоли", prompt: "Что ты умеешь?", intent: "free_chat" },
+        { id: "prompt_1", label: "Расчёт резерва", prompt: "Рассчитай резерв", intent: "reserve_calculation" },
+      ],
     });
     useAssistantContextOptionsQuery.mockReturnValue({
       data: {
@@ -74,6 +83,14 @@ describe("AiConsolePage", () => {
           updatedAt: "2026-04-23T10:00:00Z",
           lastMessageAt: "2026-04-23T10:05:00Z",
           messageCount: 2,
+          estimatedCostRub: 12,
+          tokenUsage: {
+            inputTokens: 12000,
+            outputTokens: 3000,
+            totalTokens: 15000,
+            estimatedCostUsd: 0.04,
+            estimatedCostRub: 12,
+          },
           pinnedContext: { selectedClientId: "client_1", selectedSkuId: "sku_1", selectedUploadIds: [] },
           lastIntent: "reserve_calculation",
           preferredMode: "deterministic",
@@ -154,12 +171,19 @@ describe("AiConsolePage", () => {
     });
     useCreateAssistantSessionMutation.mockReturnValue({ mutateAsync: vi.fn(), isPending: false });
     useUpdateAssistantSessionMutation.mockReturnValue({ mutateAsync: vi.fn(), isPending: false, error: null });
+    useDeleteAssistantSessionMutation.mockReturnValue({ mutateAsync: vi.fn(), isPending: false, error: null });
     const mutateAsync = vi.fn().mockResolvedValue({});
     useAssistantMessageMutation.mockReturnValue({ mutateAsync, isPending: false, error: null });
 
     renderWithProviders(<AiConsolePage />, "/ai?session=asess_1");
 
-    expect(await screen.findByText("Расчёт резерва выполнен")).toBeInTheDocument();
+    expect(await screen.findByText("Ниже резерва 2 позиции.")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Расчёт резерва выполнен" })).not.toBeInTheDocument();
+    expect(screen.getByText("2 сообщений: 12 руб.")).toBeInTheDocument();
+    expect(screen.queryByText("Reserve Run run_1")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /подробнее/i }));
+
+    expect(await screen.findByRole("heading", { name: "Подробнее" })).toBeInTheDocument();
     expect(screen.getByText("Reserve Run run_1")).toBeInTheDocument();
     expect(screen.getByText("Трассировка и вызовы инструментов")).toBeInTheDocument();
     expect(screen.getByText("calculate_reserve")).toBeInTheDocument();
@@ -170,6 +194,70 @@ describe("AiConsolePage", () => {
         payload: expect.objectContaining({ text: "Покажи critical" }),
       }),
     );
+  });
+
+  it("hides generic free-chat heading and shows MAGAMAX AI label", async () => {
+    mockBaseQueries();
+    useAssistantSessionsQuery.mockReturnValue({
+      data: [
+        {
+          id: "asess_free",
+          title: "Новая сессия",
+          status: "active",
+          createdAt: "2026-04-23T10:00:00Z",
+          updatedAt: "2026-04-23T10:00:00Z",
+          lastMessageAt: "2026-04-23T10:05:00Z",
+          messageCount: 1,
+          pinnedContext: {},
+          lastIntent: "free_chat",
+          preferredMode: "deterministic",
+          provider: "deterministic",
+        },
+      ],
+      error: null,
+    });
+    useAssistantMessagesQuery.mockReturnValue({
+      data: [
+        {
+          id: "msg_assistant_free",
+          sessionId: "asess_free",
+          role: "assistant",
+          text: "Можно писать свободно.",
+          createdAt: "2026-04-23T10:02:00Z",
+          status: "completed",
+          context: {},
+          response: {
+            answerId: "ans_free",
+            sessionId: "asess_free",
+            intent: "free_chat",
+            status: "completed",
+            confidence: 0.68,
+            title: "Доменный чат MAGAMAX",
+            summary: "Можно писать свободно, но только в контуре MAGAMAX.",
+            sections: [],
+            sourceRefs: [],
+            toolCalls: [],
+            followups: [],
+            warnings: [],
+            createdAt: "2026-04-23T10:02:00Z",
+            provider: "deterministic",
+            traceId: "trace_free",
+            contextUsed: {},
+          },
+        },
+      ],
+      error: null,
+    });
+    useCreateAssistantSessionMutation.mockReturnValue({ mutateAsync: vi.fn(), isPending: false });
+    useUpdateAssistantSessionMutation.mockReturnValue({ mutateAsync: vi.fn(), isPending: false, error: null });
+    useDeleteAssistantSessionMutation.mockReturnValue({ mutateAsync: vi.fn(), isPending: false, error: null });
+    useAssistantMessageMutation.mockReturnValue({ mutateAsync: vi.fn(), isPending: false, error: null });
+
+    renderWithProviders(<AiConsolePage />, "/ai?session=asess_free");
+
+    expect(await screen.findByText("MAGAMAX AI")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Доменный чат MAGAMAX" })).not.toBeInTheDocument();
+    expect(screen.getByText("Можно писать свободно, но только в контуре MAGAMAX.")).toBeInTheDocument();
   });
 
   it("creates a new session before sending the first question", async () => {
@@ -194,6 +282,7 @@ describe("AiConsolePage", () => {
       isPending: false,
     });
     useUpdateAssistantSessionMutation.mockReturnValue({ mutateAsync: vi.fn(), isPending: false, error: null });
+    useDeleteAssistantSessionMutation.mockReturnValue({ mutateAsync: vi.fn(), isPending: false, error: null });
     useAssistantMessageMutation.mockReturnValue({
       mutateAsync: messageMutateAsync,
       isPending: false,
@@ -202,7 +291,7 @@ describe("AiConsolePage", () => {
 
     renderWithProviders(<AiConsolePage />, "/ai");
 
-    fireEvent.change(screen.getByPlaceholderText(/спросите о резерве/i), {
+    fireEvent.change(screen.getByPlaceholderText(/напишите сообщение/i), {
       target: { value: "Покажи текущий дефицит" },
     });
     fireEvent.submit(screen.getByRole("button", { name: "Отправить запрос" }).closest("form")!);
@@ -216,9 +305,29 @@ describe("AiConsolePage", () => {
     );
   });
 
-  it("renames and archives a session from the rail", async () => {
+  it("opens context controls in a side drawer", async () => {
+    mockBaseQueries();
+    useAssistantSessionsQuery.mockReturnValue({ data: [], error: null });
+    useAssistantMessagesQuery.mockReturnValue({ data: [], error: null });
+    useCreateAssistantSessionMutation.mockReturnValue({ mutateAsync: vi.fn(), isPending: false });
+    useUpdateAssistantSessionMutation.mockReturnValue({ mutateAsync: vi.fn(), isPending: false, error: null });
+    useDeleteAssistantSessionMutation.mockReturnValue({ mutateAsync: vi.fn(), isPending: false, error: null });
+    useAssistantMessageMutation.mockReturnValue({ mutateAsync: vi.fn(), isPending: false, error: null });
+
+    renderWithProviders(<AiConsolePage />, "/ai");
+
+    expect(screen.queryByText("Контекст ИИ-консоли")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Открыть контекст ИИ-консоли" }));
+
+    expect(await screen.findByText("Контекст ИИ-консоли")).toBeInTheDocument();
+    expect(screen.getByText("Клиент")).toBeInTheDocument();
+    expect(screen.getByText("SKU")).toBeInTheDocument();
+  });
+
+  it("renames and deletes a session from hover rail actions", async () => {
     mockBaseQueries();
     const updateMutateAsync = vi.fn().mockResolvedValue({});
+    const deleteMutateAsync = vi.fn().mockResolvedValue(undefined);
     useAssistantSessionsQuery.mockReturnValue({
       data: [
         {
@@ -246,10 +355,18 @@ describe("AiConsolePage", () => {
       isPending: false,
       error: null,
     });
+    useDeleteAssistantSessionMutation.mockReturnValue({
+      mutateAsync: deleteMutateAsync,
+      isPending: false,
+      error: null,
+    });
 
     renderWithProviders(<AiConsolePage />, "/ai?session=asess_1");
 
-    fireEvent.click(await screen.findByText("Переименовать"));
+    expect(screen.queryByText("Переименовать")).not.toBeInTheDocument();
+    expect(screen.queryByText("В историю")).not.toBeInTheDocument();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Переименовать чат" }));
     fireEvent.change(screen.getByDisplayValue("Черновик"), {
       target: { value: "Сессия по Леман Про" },
     });
@@ -262,13 +379,8 @@ describe("AiConsolePage", () => {
       }),
     );
 
-    fireEvent.click(screen.getByText("В архив"));
+    fireEvent.click(screen.getByRole("button", { name: "Удалить чат" }));
 
-    await waitFor(() =>
-      expect(updateMutateAsync).toHaveBeenCalledWith({
-        sessionId: "asess_1",
-        payload: { status: "archived" },
-      }),
-    );
+    await waitFor(() => expect(deleteMutateAsync).toHaveBeenCalledWith("asess_1"));
   });
 });

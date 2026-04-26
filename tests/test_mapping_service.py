@@ -21,3 +21,21 @@ def test_mapping_detects_sales_headers_in_russian() -> None:
     assert canonical_map["Сеть"] == "client_name"
     assert canonical_map["Кол-во"] == "quantity"
     assert canonical_map["Дата"] == "period_date"
+
+
+def test_mapping_detects_stock_department_header_as_warehouse() -> None:
+    frame = pd.DataFrame(
+        [
+            {
+                "Артикул": "K-2650-CR",
+                "Остаток свободный": 12,
+                "Дата": "2026-04-01",
+                "Подразделение": "0311 ОТДЕЛ ПРОДАЖ КОМПЛЕКТУЮЩИЕ МОСКВА",
+            },
+        ]
+    )
+
+    mappings = build_mapping_fields(frame, "stock")
+    canonical_map = {item.source: item.canonical for item in mappings}
+
+    assert canonical_map["Подразделение"] == "warehouse_name"

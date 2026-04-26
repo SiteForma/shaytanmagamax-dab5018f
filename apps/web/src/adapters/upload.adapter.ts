@@ -36,11 +36,26 @@ export function mappingFieldApiToViewModel(item: any): MappingField {
 }
 
 export function uploadJobApiToViewModel(item: any): UploadJob {
+  const sourceDetection = item.source_detection
+    ? {
+        requiresConfirmation: item.source_detection.requires_confirmation ?? false,
+        confirmed: item.source_detection.confirmed ?? false,
+        detectedSourceType: item.source_detection.detected_source_type,
+        selectedSourceType: item.source_detection.selected_source_type,
+        candidates: (item.source_detection.candidates ?? []).map((candidate: any) => ({
+          sourceType: candidate.source_type,
+          confidence: candidate.confidence ?? 0,
+          matchedFields: candidate.matched_fields ?? [],
+        })),
+        customEntityName: item.source_detection.custom_entity_name ?? null,
+      }
+    : null;
   return {
     id: item.id,
     batchId: item.batch_id,
     fileName: item.file_name,
     sourceType: item.source_type,
+    detectedSourceType: item.detected_source_type ?? item.source_type,
     sizeBytes: item.size_bytes,
     uploadedAt: item.uploaded_at,
     state: item.status ?? item.state,
@@ -53,6 +68,7 @@ export function uploadJobApiToViewModel(item: any): UploadJob {
     canValidate: item.readiness?.can_validate ?? false,
     canEditMapping: item.readiness?.can_edit_mapping ?? true,
     duplicateOfBatchId: item.duplicate_of_batch_id ?? null,
+    sourceDetection,
   };
 }
 

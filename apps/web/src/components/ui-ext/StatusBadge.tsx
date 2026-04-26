@@ -30,6 +30,7 @@ const STYLES: Record<string, string> = {
 
   uploaded:              "bg-surface-muted text-ink-secondary border-line-subtle",
   parsing:               "bg-info/15 text-info border-info/30",
+  source_confirmation_required: "bg-warning/15 text-warning border-warning/30",
   mapping_required:      "bg-warning/15 text-warning border-warning/30",
   validating:            "bg-info/15 text-info border-info/30",
   issues_found:          "bg-warning/15 text-warning border-warning/30",
@@ -70,6 +71,7 @@ const LABELS: Record<string, string> = {
 
   uploaded: "Загружен",
   parsing: "Разбор",
+  source_confirmation_required: "Подтвердите тип",
   mapping_required: "Нужно сопоставление",
   validating: "Проверка",
   issues_found: "Есть проблемы",

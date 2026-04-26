@@ -21,10 +21,12 @@ from apps.api.app.modules.uploads.schemas import (
     UploadIssueResponse,
     UploadJobResponse,
     UploadPreviewResponse,
+    UploadSourceTypeUpdateRequest,
 )
 from apps.api.app.modules.uploads.service import (
     apply_upload,
     apply_upload_file,
+    confirm_upload_source_type,
     create_upload,
     create_upload_file,
     get_upload_batch_detail,
@@ -126,6 +128,38 @@ def get_upload_mapping_route(
     file_id: str, db: Session = Depends(get_db)
 ) -> MappingStateResponse:
     return get_upload_mapping_state(db, file_id)
+
+
+@router.post("/files/{file_id}/source-type", response_model=UploadFileDetailResponse)
+def confirm_upload_source_type_route(
+    file_id: str,
+    payload: UploadSourceTypeUpdateRequest,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings_dependency),
+    current_user: User = Depends(require_capability("uploads", "write")),
+) -> UploadFileDetailResponse:
+    detail = confirm_upload_source_type(
+        db,
+        settings,
+        file_id,
+        source_type=payload.source_type,
+        new_entity_name=payload.new_entity_name,
+    )
+    record_audit_event(
+        db,
+        actor_user_id=current_user.id,
+        action="uploads.source_type_confirmed",
+        target_type="upload_file",
+        target_id=file_id,
+        context={
+            "source_type": detail.file.source_type,
+            "detected_source_type": detail.file.detected_source_type,
+            "custom_entity_name": payload.new_entity_name,
+            "status": detail.file.status,
+        },
+    )
+    db.commit()
+    return detail
 
 
 @router.post("/files/{file_id}/mapping", response_model=UploadFileDetailResponse)

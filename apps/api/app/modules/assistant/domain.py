@@ -15,6 +15,15 @@ class AssistantWarningData:
 
 
 @dataclass(slots=True)
+class AssistantTokenUsageData:
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+    estimated_cost_usd: float = 0.0
+    estimated_cost_rub: float = 0.0
+
+
+@dataclass(slots=True)
 class AssistantRoute:
     intent: AssistantIntent
     extracted_client_id: str | None = None
@@ -28,6 +37,17 @@ class AssistantRoute:
     safety_factor: float | None = None
     include_inbound: bool = True
     warnings: list[AssistantWarningData] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class AssistantRoutePlan:
+    intent: AssistantIntent | None = None
+    tool_question: str | None = None
+    tool_names: list[str] = field(default_factory=list)
+    confidence: float = 0.0
+    planner: str = "deterministic"
+    rationale: str | None = None
+    token_usage: AssistantTokenUsageData = field(default_factory=AssistantTokenUsageData)
 
 
 @dataclass(slots=True)
@@ -72,3 +92,4 @@ class AssistantAnswerDraft:
     followups: list[dict[str, Any]]
     warnings: list[AssistantWarningData]
     context_used: AssistantResolvedContext
+    user_text: str | None = None

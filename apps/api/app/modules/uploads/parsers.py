@@ -39,6 +39,18 @@ def read_upload_payload(payload: bytes, file_name: str) -> ParseResult:
         except UnicodeDecodeError as exc:
             last_error = exc
             continue
+        except Exception as exc:
+            last_error = exc
+            for separator in (",", ";", "\t"):
+                try:
+                    frame = pd.read_csv(BytesIO(payload), encoding=encoding, sep=separator)
+                    return ParseResult(frame=_clean_frame(frame), parser="csv", encoding=encoding)
+                except UnicodeDecodeError as unicode_exc:
+                    last_error = unicode_exc
+                    break
+                except Exception as separator_exc:
+                    last_error = separator_exc
+                    continue
     if last_error is not None:
         raise last_error
     frame = pd.read_csv(BytesIO(payload))

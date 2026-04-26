@@ -9,7 +9,9 @@ ASSISTANT_SYSTEM_PROMPT_V1 = """
 
 INTENT_REFINEMENT_PROMPT_V1 = """
 Уточни намерение пользователя и извлеки только те параметры, которые прямо следуют из вопроса и pinned context.
-Если намерение неоднозначно, верни unsupported_or_ambiguous и короткое объяснение.
+Если сообщение касается работы с MAGAMAX, загруженных данных, резервов, SKU, клиентов, склада, поставок,
+ingestion, mapping, качества данных или того, как пользоваться этой консолью, верни free_chat или более точный operational intent.
+Для любых внешних тем верни unsupported_or_ambiguous.
 """.strip()
 
 

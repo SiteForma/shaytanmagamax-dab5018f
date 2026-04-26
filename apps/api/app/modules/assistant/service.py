@@ -5,16 +5,19 @@ from sqlalchemy.orm import Session
 
 from apps.api.app.core.config import Settings
 from apps.api.app.db.models import Category, User
+from apps.api.app.db.models import AssistantMessage
 from apps.api.app.modules.assistant.orchestration import execute_assistant_query
 from apps.api.app.modules.assistant.repository import (
     append_assistant_message,
     append_user_message,
     create_session,
+    delete_session,
     get_session,
     list_messages,
     list_sessions,
     serialize_message,
     serialize_session,
+    summarize_session_token_usage,
     update_session,
     update_session_context,
 )
@@ -43,6 +46,12 @@ from apps.api.app.modules.uploads.service import list_upload_files
 
 PROMPT_SUGGESTIONS = [
     AssistantPromptSuggestion(
+        id="free_chat",
+        label="Возможности консоли",
+        prompt="Объясни, как лучше задавать вопросы в этой консоли",
+        intent="free_chat",
+    ),
+    AssistantPromptSuggestion(
         id="reserve_calc",
         label="Расчёт резерва по клиенту",
         prompt="Рассчитай резерв для Леман Про на 3 месяца по выбранным SKU",
@@ -66,7 +75,36 @@ PROMPT_SUGGESTIONS = [
         prompt="Какие входящие поставки сильнее всего снижают текущий дефицит?",
         intent="inbound_impact",
     ),
+    AssistantPromptSuggestion(
+        id="management_report",
+        label="Управленческий отчёт 2025",
+        prompt="Покажи управленческий отчёт 2025: подразделения, выручка, ПДЗ и спрос",
+        intent="management_report_summary",
+    ),
 ]
+
+
+def _message_history_for_planning(messages: list[AssistantMessage]) -> list[dict[str, object]]:
+    history: list[dict[str, object]] = []
+    for message in messages[-8:]:
+        response_payload = message.response_payload or {}
+        history.append(
+            {
+                "role": message.role,
+                "text": message.message_text[:1200],
+                "intent": message.intent,
+                "status": message.status,
+                "title": response_payload.get("title") if isinstance(response_payload, dict) else None,
+                "summary": response_payload.get("summary") if isinstance(response_payload, dict) else None,
+                "sourceRefs": (response_payload.get("sourceRefs") or [])[:4]
+                if isinstance(response_payload, dict)
+                else [],
+                "toolCalls": (response_payload.get("toolCalls") or [])[:4]
+                if isinstance(response_payload, dict)
+                else [],
+            }
+        )
+    return history
 
 
 def _normalized_context(
@@ -91,12 +129,12 @@ def create_assistant_session(
         preferred_mode=payload.preferred_mode,
         pinned_context=payload.pinned_context,
     )
-    return serialize_session(session)
+    return serialize_session(session, token_usage=summarize_session_token_usage(db, session.id))
 
 
 def list_assistant_sessions(db: Session, *, current_user: User | None) -> list[AssistantSessionSummary]:
     return [
-        serialize_session(session)
+        serialize_session(session, token_usage=summarize_session_token_usage(db, session.id))
         for session in list_sessions(db, user_id=current_user.id if current_user else None)
     ]
 
@@ -112,7 +150,13 @@ def get_assistant_session_detail(
         serialize_message(message)
         for message in list_messages(db, session.id, user_id=current_user.id if current_user else None)
     ]
-    return AssistantSessionDetail(**serialize_session(session).model_dump(), messages=messages)
+    return AssistantSessionDetail(
+        **serialize_session(
+            session,
+            token_usage=summarize_session_token_usage(db, session.id),
+        ).model_dump(),
+        messages=messages,
+    )
 
 
 def update_assistant_session(
@@ -131,7 +175,16 @@ def update_assistant_session(
         preferred_mode=payload.preferred_mode,
         pinned_context=payload.pinned_context.normalized() if payload.pinned_context else None,
     )
-    return serialize_session(session)
+    return serialize_session(session, token_usage=summarize_session_token_usage(db, session.id))
+
+
+def delete_assistant_session(
+    db: Session,
+    *,
+    session_id: str,
+    current_user: User | None,
+) -> None:
+    delete_session(db, session_id, user_id=current_user.id if current_user else None)
 
 
 def list_assistant_messages(
@@ -155,6 +208,11 @@ def post_assistant_message(
     current_user: User | None,
 ) -> AssistantSessionMessageResult:
     session = get_session(db, session_id, user_id=current_user.id if current_user else None)
+    previous_messages = list_messages(
+        db,
+        session.id,
+        user_id=current_user.id if current_user else None,
+    )
     context = _normalized_context(payload.context, session.pinned_context)
     update_session_context(
         db,
@@ -179,6 +237,7 @@ def post_assistant_message(
             context=context,
         ),
         created_by_id=current_user.id if current_user else None,
+        history=_message_history_for_planning(previous_messages),
     )
     assistant_message = append_assistant_message(
         db,
@@ -196,7 +255,10 @@ def post_assistant_message(
     db.commit()
     updated_session = get_session(db, session_id, user_id=current_user.id if current_user else None)
     return AssistantSessionMessageResult(
-        session=serialize_session(updated_session),
+        session=serialize_session(
+            updated_session,
+            token_usage=summarize_session_token_usage(db, updated_session.id),
+        ),
         userMessage=serialize_message(user_message),
         assistantMessage=serialize_message(assistant_message),
         response=response,
@@ -236,6 +298,7 @@ def get_assistant_capabilities(settings: Settings) -> AssistantCapabilitiesRespo
         provider=settings.assistant_provider if settings.assistant_llm_enabled else "deterministic",
         deterministicFallback=True,
         intents=[
+            AssistantCapability(key="free_chat", label="MAGAMAX AI"),
             AssistantCapability(key="reserve_calculation", label="Расчёт резерва"),
             AssistantCapability(key="reserve_explanation", label="Объяснение строки резерва"),
             AssistantCapability(key="sku_summary", label="Сводка по SKU"),
@@ -244,6 +307,7 @@ def get_assistant_capabilities(settings: Settings) -> AssistantCapabilitiesRespo
             AssistantCapability(key="stock_risk_summary", label="Риск покрытия"),
             AssistantCapability(key="upload_status_summary", label="Freshness и ingestion-контур"),
             AssistantCapability(key="quality_issue_summary", label="Качество данных"),
+            AssistantCapability(key="management_report_summary", label="Управленческий отчёт 2025"),
         ],
         sessionSupport=True,
         pinnedContextSupport=True,

@@ -27,6 +27,7 @@ from apps.api.app.modules.reserve.service import (
     get_run_detail,
     get_run_rows,
 )
+from apps.api.app.modules.reports.service import get_management_report_assistant_context
 from apps.api.app.modules.stock.service import get_stock_coverage
 from apps.api.app.modules.uploads.service import get_upload_file_detail, list_upload_files
 
@@ -602,3 +603,52 @@ def _dashboard_payload(
         )
     ]
     return overview, "Получена dashboard summary", refs, []
+
+
+def tool_get_management_report(db: Session, question: str) -> AssistantToolExecution:
+    return _measure_tool(
+        "get_management_report",
+        {"question": question},
+        lambda: _management_report_payload(db, question),
+    )
+
+
+def _management_report_payload(
+    db: Session,
+    question: str,
+) -> tuple[object, str, list[dict[str, object]], list[AssistantWarningData]]:
+    payload = get_management_report_assistant_context(db, question)
+    latest = payload.get("latest_import")
+    if latest is None:
+        return (
+            payload,
+            "Управленческий отчёт не найден",
+            [],
+            [
+                AssistantWarningData(
+                    code="management_report_missing",
+                    message="В БД нет импортированного управленческого отчёта.",
+                    severity="warning",
+                )
+            ],
+        )
+    refs = [
+        _source_ref(
+            source_type="management_report",
+            source_label=f"Управленческий отчёт {latest.file_name}",
+            entity_type="management_report_import",
+            entity_id=latest.id,
+            external_key=latest.checksum[:12],
+            freshness_at=latest.created_at,
+            role="primary",
+            route="/reports/management/summary",
+            detail=f"{latest.raw_row_count} raw-строк, {latest.metric_count} метрик",
+        )
+    ]
+    metrics = payload.get("metrics") or []
+    return (
+        payload,
+        f"Собран контекст управленческого отчёта: {len(metrics)} релевантных метрик",
+        refs,
+        [],
+    )

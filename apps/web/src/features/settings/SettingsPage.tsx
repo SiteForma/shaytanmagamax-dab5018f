@@ -1,16 +1,75 @@
-import { useState } from "react";
+import { useState, type DragEvent } from "react";
 import { PageHeader, SectionTitle } from "@/components/ui-ext/PageHeader";
 import { MagamaxLogo } from "@/components/brand/MagamaxLogo";
 import { useTheme } from "@/lib/theme";
 import { Button } from "@/components/ui/button";
 import { LoginDialog } from "@/components/auth/LoginDialog";
 import { useCurrentUserQuery, useLogoutAction } from "@/hooks/queries/use-auth";
+import { NAV_SECTIONS } from "@/lib/constants";
+import { hasCapability } from "@/lib/access";
+import {
+  moveSidebarMenuPath,
+  orderNavItems,
+  useSidebarMenuOrder,
+} from "@/lib/navigation-preferences";
+import {
+  Boxes,
+  Building2,
+  Calculator,
+  GripVertical,
+  LayoutDashboard,
+  RotateCcw,
+  Settings,
+  ShieldAlert,
+  ShieldCheck,
+  Sparkles,
+  Truck,
+  Upload,
+  Warehouse,
+  Workflow,
+} from "lucide-react";
+import { cn } from "@/lib/utils";
+
+const NAV_ICONS = {
+  LayoutDashboard,
+  Calculator,
+  Boxes,
+  Building2,
+  Warehouse,
+  Truck,
+  Upload,
+  Workflow,
+  ShieldAlert,
+  ShieldCheck,
+  Sparkles,
+  Settings,
+} as const;
 
 export default function SettingsPage() {
   const { theme, setTheme } = useTheme();
   const [loginOpen, setLoginOpen] = useState(false);
+  const [draggedPath, setDraggedPath] = useState<string | null>(null);
   const { data: currentUser } = useCurrentUserQuery();
   const logout = useLogoutAction();
+  const { order, setOrder, resetOrder } = useSidebarMenuOrder();
+  const menuItems = orderNavItems(
+    NAV_SECTIONS.filter((item) => !currentUser || !item.capability || hasCapability(currentUser, item.capability)),
+    order,
+  );
+
+  const handleDragStart = (event: DragEvent<HTMLDivElement>, path: string) => {
+    setDraggedPath(path);
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", path);
+  };
+
+  const handleDrop = (event: DragEvent<HTMLDivElement>, targetPath: string) => {
+    event.preventDefault();
+    const activePath = draggedPath ?? event.dataTransfer.getData("text/plain");
+    if (activePath) setOrder(moveSidebarMenuPath(order, activePath, targetPath));
+    setDraggedPath(null);
+  };
+
   return (
     <>
       <PageHeader eyebrow="Рабочее пространство" title="Настройки" description="Личные значения по умолчанию: тема, плотность таблиц, горизонт резерва, статус брендовых ассетов." />
@@ -82,6 +141,59 @@ export default function SettingsPage() {
                 Выйти
               </Button>
             </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="mt-4">
+        <div className="panel p-5 space-y-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="space-y-1">
+              <SectionTitle>Порядок левого меню</SectionTitle>
+              <p className="max-w-2xl text-xs leading-relaxed text-ink-muted">
+                Перетащите пункт выше или ниже. Порядок сохраняется для этого браузера и сразу применяется в левом сайдбаре.
+              </p>
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="border-line-subtle bg-surface-panel"
+              onClick={resetOrder}
+            >
+              <RotateCcw className="mr-2 h-3.5 w-3.5" />
+              Сбросить порядок
+            </Button>
+          </div>
+
+          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+            {menuItems.map((item, index) => {
+              const Icon = NAV_ICONS[item.icon];
+              const isDragging = draggedPath === item.path;
+              return (
+                <div
+                  key={item.path}
+                  draggable
+                  onDragStart={(event) => handleDragStart(event, item.path)}
+                  onDragEnd={() => setDraggedPath(null)}
+                  onDragOver={(event) => event.preventDefault()}
+                  onDrop={(event) => handleDrop(event, item.path)}
+                  className={cn(
+                    "group flex cursor-grab items-center gap-3 rounded-xl border border-line-subtle bg-surface-muted/45 px-3 py-2.5 transition",
+                    "hover:border-brand/45 hover:bg-surface-muted active:cursor-grabbing",
+                    isDragging && "scale-[0.99] border-brand/60 opacity-50",
+                  )}
+                  aria-label={`Перетащить пункт меню ${item.label}`}
+                >
+                  <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-surface-panel text-[11px] text-ink-muted">
+                    {index + 1}
+                  </span>
+                  <Icon className="h-4 w-4 shrink-0 text-brand" />
+                  <span className="min-w-0 flex-1 truncate text-sm font-medium text-ink">{item.label}</span>
+                  <GripVertical className="h-4 w-4 shrink-0 text-ink-muted opacity-60 transition group-hover:opacity-100" />
+                </div>
+              );
+            })}
           </div>
         </div>
       </section>

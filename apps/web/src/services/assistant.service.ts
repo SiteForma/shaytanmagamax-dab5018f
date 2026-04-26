@@ -82,6 +82,10 @@ export async function updateAssistantSession(
   return assistantSessionApiToViewModel(response);
 }
 
+export async function deleteAssistantSession(sessionId: string): Promise<void> {
+  await api.delete(`/assistant/sessions/${sessionId}`);
+}
+
 export async function getAssistantMessages(sessionId: string) {
   const response = await api.get<any[]>(`/assistant/sessions/${sessionId}/messages`);
   return response.map(assistantMessageApiToViewModel);

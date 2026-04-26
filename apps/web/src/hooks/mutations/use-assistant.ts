@@ -3,6 +3,7 @@ import { queryKeys } from "@/lib/query/keys";
 import {
   askAssistant,
   createAssistantSession,
+  deleteAssistantSession,
   postAssistantMessage,
   updateAssistantSession,
   type AssistantPayload,
@@ -66,6 +67,18 @@ export function useUpdateAssistantSessionMutation() {
       void queryClient.invalidateQueries({
         queryKey: queryKeys.assistant.messages(session.id),
       });
+    },
+  });
+}
+
+export function useDeleteAssistantSessionMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (sessionId: string) => deleteAssistantSession(sessionId),
+    onSuccess: (_result, sessionId) => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.assistant.sessions() });
+      void queryClient.removeQueries({ queryKey: queryKeys.assistant.session(sessionId) });
+      void queryClient.removeQueries({ queryKey: queryKeys.assistant.messages(sessionId) });
     },
   });
 }

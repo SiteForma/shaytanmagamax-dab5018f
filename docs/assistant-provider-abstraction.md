@@ -17,15 +17,20 @@ Assistant layer спроектирован provider-agnostic.
 
 ### `openai_compatible`
 
-Это optional provider для финальной редактуры ответа поверх grounded draft.
+Это optional provider для двух ограниченных задач:
+
+- planner step: интерпретировать запрос, выбрать `intent`, безопасный `toolQuestion` и allowlisted `toolNames`;
+- finalizer step: отредактировать формулировки grounded draft без изменения фактов.
 
 Текущее поведение:
 
-- deterministic orchestration остаётся source of truth;
-- provider получает только already grounded draft, а не доступ к сырой БД;
+- при включённом LLM provider сначала вызывается planner, даже если deterministic router не распознал запрос;
+- provider не получает прямого доступа к БД и не может выполнить произвольный tool;
+- backend выполняет только allowlisted domain tools и сохраняет deterministic required tools для каждого intent;
 - provider может переписать `title`, `summary` и narrative-тексты секций;
-- metrics, tool outputs, source refs и warnings остаются anchored в deterministic layer;
-- если конфиг неполный, провайдер отвечает ошибкой, а assistant автоматически уходит в deterministic fallback.
+- metrics, tool outputs, source refs и warnings остаются anchored в backend domain layer;
+- если конфиг неполный или provider недоступен, assistant автоматически уходит в deterministic fallback;
+- out-of-scope запросы могут попадать в planner только для классификации, но ответ остаётся детерминированным отказом без domain tools.
 
 ## Config Surface
 
@@ -55,7 +60,7 @@ Assistant layer спроектирован provider-agnostic.
 - обходить domain services;
 - зашивать бизнес-логику в prompts.
 
-Провайдер только финализирует answer composition поверх already grounded tool outputs.
+Провайдер выбирает маршрут и редактирует answer composition, но source of truth остаётся в backend services.
 
 ## Future Integration Contract
 
@@ -66,12 +71,23 @@ LLM provider должен получать:
 - explicit source refs;
 - tool outputs;
 - prompt templates из отдельного prompt layer.
+- список разрешённых intents/tools для planner step.
 
 LLM provider не должен получать raw unrestricted database dump.
 
 ## Current Network Contract
 
 OpenAI-compatible provider сейчас использует `POST /chat/completions` и просит вернуть JSON-объект:
+
+Planner:
+
+- `intent`
+- `confidence`
+- `toolQuestion`
+- `toolNames`
+- `rationale`
+
+Finalizer:
 
 - `title`
 - `summary`

@@ -16,14 +16,15 @@ from apps.api.app.modules.uploads.validation import validate_frame
 def _upload_file(
     client: TestClient,
     fixture_path: Path,
-    source_type: str,
+    source_type: str | None,
     content_type: str = "text/csv",
 ) -> dict[str, object]:
+    data = {"source_type": source_type} if source_type else {}
     with fixture_path.open("rb") as fixture_file:
         response = client.post(
             "/api/uploads/files",
             headers={"X-Dev-User": "user_admin"},
-            data={"source_type": source_type},
+            data=data,
             files={"file": (fixture_path.name, fixture_file, content_type)},
         )
     assert response.status_code == 200
@@ -48,6 +49,23 @@ def test_read_upload_payload_supports_csv_bytes() -> None:
     result = read_upload_payload(payload, "sales_messy.csv")
     assert result.parser == "csv"
     assert list(result.frame.columns) == ["Артикул", "Контрагент", "Кол-во", "Период", "Выручка"]
+
+
+def test_read_upload_payload_supports_single_column_csv() -> None:
+    payload = (
+        "Подразделение\n"
+        "0311 ОТДЕЛ ПРОДАЖ КОМПЛЕКТУЮЩИЕ МОСКВА\n"
+        "0336 ОТДЕЛ СЕТЕВЫХ ПРОДАЖ\n"
+    ).encode("utf-8")
+
+    result = read_upload_payload(payload, "departments.csv")
+
+    assert result.parser == "csv"
+    assert list(result.frame.columns) == ["Подразделение"]
+    assert result.frame["Подразделение"].tolist() == [
+        "0311 ОТДЕЛ ПРОДАЖ КОМПЛЕКТУЮЩИЕ МОСКВА",
+        "0336 ОТДЕЛ СЕТЕВЫХ ПРОДАЖ",
+    ]
 
 
 def test_mapping_engine_handles_messy_sales_headers() -> None:
@@ -94,6 +112,29 @@ def test_upload_preview_flow_returns_real_preview(client: TestClient) -> None:
     assert detail["file"]["status"] == "ready_to_apply"
     assert detail["validation"]["valid_rows"] == 3
     assert detail["file"]["readiness"]["can_apply"] is True
+
+
+def test_upload_without_source_type_requires_detection_confirmation(client: TestClient) -> None:
+    payload = _upload_file(client, Path("data/fixtures/uploads/sales_valid.csv"), None)
+    file_id = payload["file"]["id"]
+
+    assert payload["file"]["status"] == "source_confirmation_required"
+    assert payload["file"]["source_type"] == "sales"
+    assert payload["file"]["source_detection"]["requires_confirmation"] is True
+    assert payload["file"]["source_detection"]["confirmed"] is False
+    assert payload["file"]["readiness"]["can_validate"] is False
+
+    confirm_response = client.post(
+        f"/api/uploads/files/{file_id}/source-type",
+        headers={"X-Dev-User": "user_admin"},
+        json={"source_type": "sales"},
+    )
+
+    assert confirm_response.status_code == 200
+    confirmed = confirm_response.json()
+    assert confirmed["file"]["source_detection"]["confirmed"] is True
+    assert confirmed["file"]["status"] == "ready_to_apply"
+    assert confirmed["file"]["readiness"]["can_apply"] is True
 
 
 def test_duplicate_upload_warning_path(client: TestClient) -> None:

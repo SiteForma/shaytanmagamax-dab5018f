@@ -1,6 +1,6 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { FileSpreadsheet, Upload, ArrowRight, ShieldAlert, Play } from "lucide-react";
+import { FileSpreadsheet, Upload, ArrowRight, ShieldAlert, Play, CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui-ext/PageHeader";
@@ -11,6 +11,7 @@ import { fmtBytes, fmtInt, fmtRelative } from "@/lib/formatters";
 import { SOURCE_TYPE_LABELS, formatSourceTypeLabel } from "@/lib/upload-labels";
 import {
   useApplyUploadMutation,
+  useConfirmUploadSourceTypeMutation,
   useCreateUploadMutation,
   useUploadFileDetailQuery,
   useUploadJobsQuery,
@@ -22,6 +23,7 @@ import type { UploadJob } from "@/types";
 const STATE_TONE: Record<UploadJob["state"], string> = {
   uploaded: "text-ink-muted",
   parsing: "text-info",
+  source_confirmation_required: "text-warning",
   mapping_required: "text-warning",
   validating: "text-info",
   issues_found: "text-warning",
@@ -39,6 +41,7 @@ const STATE_TONE: Record<UploadJob["state"], string> = {
 const STATE_LABEL: Record<UploadJob["state"], string> = {
   uploaded: "загружен",
   parsing: "парсинг",
+  source_confirmation_required: "подтвердите тип",
   mapping_required: "нужно сопоставление",
   validating: "проверка",
   issues_found: "есть проблемы",
@@ -55,9 +58,11 @@ const STATE_LABEL: Record<UploadJob["state"], string> = {
 
 export default function UploadCenterPage() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const [selectedRecognitionType, setSelectedRecognitionType] = useState<string>("sales");
+  const [newEntityName, setNewEntityName] = useState("");
   const selectedFileId = searchParams.get("file");
   const status = searchParams.get("status") ?? "all";
-  const sourceType = searchParams.get("source") ?? "sales";
+  const sourceType = searchParams.get("source") ?? "all";
   const page = Number(searchParams.get("page") ?? "1");
   const pageSize = Number(searchParams.get("pageSize") ?? "12");
   const jobsQuery = useUploadJobsQuery({
@@ -70,6 +75,7 @@ export default function UploadCenterPage() {
   const jobsMeta = jobsQuery.data?.meta;
   const detailQuery = useUploadFileDetailQuery(selectedFileId);
   const createMutation = useCreateUploadMutation();
+  const confirmSourceMutation = useConfirmUploadSourceTypeMutation();
   const validateMutation = useValidateUploadMutation();
   const applyMutation = useApplyUploadMutation();
   const canWrite = useHasCapability("uploads:write");
@@ -86,12 +92,18 @@ export default function UploadCenterPage() {
     setSearchParams(next, { replace: true });
   }, [jobs, searchParams, selectedFileId, setSearchParams]);
 
+  useEffect(() => {
+    const detection = selected?.sourceDetection;
+    if (!detection) return;
+    setSelectedRecognitionType(detection.detectedSourceType ?? selected.sourceType);
+    setNewEntityName(detection.customEntityName ?? "");
+  }, [selected?.id, selected?.sourceDetection, selected?.sourceType]);
+
   async function onFileSelected(file: File | null) {
     if (!file) return;
     try {
       const detail = await createMutation.mutateAsync({
         file,
-        sourceType: sourceType === "all" ? "sales" : sourceType,
       });
       const next = new URLSearchParams(searchParams);
       next.set("file", detail.file.id);
@@ -122,6 +134,20 @@ export default function UploadCenterPage() {
     }
   }
 
+  async function onConfirmSourceType() {
+    if (!selected) return;
+    try {
+      await confirmSourceMutation.mutateAsync({
+        fileId: selected.id,
+        sourceType: selectedRecognitionType === "__new__" ? "raw_report" : selectedRecognitionType,
+        newEntityName: selectedRecognitionType === "__new__" ? newEntityName : undefined,
+      });
+      toast.success("Тип данных подтверждён, сопоставление пересобрано");
+    } catch {
+      toast.error("Не удалось подтвердить тип данных");
+    }
+  }
+
   return (
     <>
       <PageHeader
@@ -139,27 +165,10 @@ export default function UploadCenterPage() {
             <div>
               <div className="text-sm font-medium text-ink">Загрузите файл в конвейер загрузки данных</div>
               <div className="text-xs text-ink-muted">
-                CSV/XLSX. Сохраняем оригинал, строим предпросмотр, подсказываем сопоставление, фиксируем проблемы и след применения.
+                CSV/XLSX. Тип данных определим автоматически, затем покажем распознавание для подтверждения или ручного выбора.
               </div>
             </div>
             <div className="flex items-center gap-2">
-              <select
-                value={sourceType}
-                onChange={(event) => {
-                  const next = new URLSearchParams(searchParams);
-                  if (event.target.value === "all") next.delete("source");
-                  else next.set("source", event.target.value);
-                  next.delete("page");
-                  setSearchParams(next);
-                }}
-                className="h-9 rounded-md border border-line-subtle bg-surface-panel px-3 text-sm text-ink"
-              >
-                {Object.entries(SOURCE_TYPE_LABELS).map(([value, label]) => (
-                  <option key={value} value={value}>
-                    {label}
-                  </option>
-                ))}
-              </select>
               <label className="inline-flex">
                 <input
                   type="file"
@@ -171,6 +180,9 @@ export default function UploadCenterPage() {
                   <span>{createMutation.isPending ? "Загрузка…" : "Выбрать файл"}</span>
                 </Button>
               </label>
+            </div>
+            <div className="text-[11px] text-ink-muted">
+              После загрузки можно акцептировать распознанный тип, выбрать другую сущность или оформить новый сырой отчёт.
             </div>
           </div>
         </div>
@@ -207,6 +219,73 @@ export default function UploadCenterPage() {
                   {formatSourceTypeLabel(selected.sourceType)} · {fmtBytes(selected.sizeBytes)} · {fmtRelative(selected.uploadedAt)}
                 </div>
               </div>
+              {selected.sourceDetection ? (
+                <div className="rounded-xl border border-line-subtle bg-surface-muted/35 p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-muted">
+                        Распознавание типа данных
+                      </div>
+                      <div className="mt-1 text-sm text-ink">
+                        {selected.sourceDetection.confirmed ? "Подтверждено: " : "Распознано: "}
+                        <span className="font-semibold">
+                          {selected.sourceDetection.customEntityName
+                            ? selected.sourceDetection.customEntityName
+                            : formatSourceTypeLabel(selected.sourceDetection.detectedSourceType)}
+                        </span>
+                      </div>
+                      {selected.sourceDetection.candidates.length ? (
+                        <div className="mt-1 text-xs text-ink-muted">
+                          уверенность {Math.round(selected.sourceDetection.candidates[0].confidence * 100)}%
+                          {selected.sourceDetection.candidates[0].matchedFields.length
+                            ? ` · совпали поля: ${selected.sourceDetection.candidates[0].matchedFields.slice(0, 3).join(", ")}`
+                            : ""}
+                        </div>
+                      ) : null}
+                    </div>
+                    {selected.sourceDetection.confirmed ? (
+                      <CheckCircle2 className="mt-1 h-4 w-4 text-success" />
+                    ) : null}
+                  </div>
+
+                  {selected.sourceDetection.requiresConfirmation && !selected.sourceDetection.confirmed ? (
+                    <div className="mt-3 space-y-2">
+                      <select
+                        value={selectedRecognitionType}
+                        onChange={(event) => setSelectedRecognitionType(event.target.value)}
+                        className="h-9 w-full rounded-md border border-line-subtle bg-surface-panel px-2 text-sm text-ink"
+                      >
+                        {Object.entries(SOURCE_TYPE_LABELS).map(([value, label]) => (
+                          <option key={value} value={value}>
+                            {label}
+                          </option>
+                        ))}
+                        <option value="__new__">Новая сущность / новый сырой отчёт</option>
+                      </select>
+                      {selectedRecognitionType === "__new__" ? (
+                        <input
+                          value={newEntityName}
+                          onChange={(event) => setNewEntityName(event.target.value)}
+                          placeholder="Название новой сущности"
+                          className="h-9 w-full rounded-md border border-line-subtle bg-surface-panel px-2 text-sm text-ink placeholder:text-ink-muted"
+                        />
+                      ) : null}
+                      <Button
+                        size="sm"
+                        className="w-full bg-brand text-brand-foreground hover:bg-brand-hover"
+                        disabled={
+                          !canWrite ||
+                          confirmSourceMutation.isPending ||
+                          (selectedRecognitionType === "__new__" && !newEntityName.trim())
+                        }
+                        onClick={onConfirmSourceType}
+                      >
+                        {confirmSourceMutation.isPending ? "Подтверждаем…" : "Акцептировать распознавание"}
+                      </Button>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
               <div className="grid grid-cols-2 gap-2 text-xs">
                 <Stat label="Строк" value={fmtInt(selected.rows)} />
                 <Stat label="Проблем" value={fmtInt(selected.issues)} />
