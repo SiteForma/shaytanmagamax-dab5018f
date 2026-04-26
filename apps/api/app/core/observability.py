@@ -21,7 +21,9 @@ def configure_observability(app: FastAPI, settings: Settings, engine: Engine) ->
 
 def configure_worker_observability(settings: Settings, engine: Engine) -> None:
     _configure_sentry(settings)
-    _configure_opentelemetry(None, settings, engine, service_name=f"{settings.otel_service_name}-worker")
+    _configure_opentelemetry(
+        None, settings, engine, service_name=f"{settings.otel_service_name}-worker"
+    )
 
 
 def _configure_sentry(settings: Settings) -> None:

@@ -114,9 +114,18 @@ def _entities_from_args(args: dict[str, Any]) -> AssistantEntityState:
     )
 
 
-def _merge_entities(base: AssistantEntityState, incoming: AssistantEntityState) -> AssistantEntityState:
+def _merge_entities(
+    base: AssistantEntityState, incoming: AssistantEntityState
+) -> AssistantEntityState:
     merged = replace(base)
-    for attr in ("client_id", "client_name", "sku_id", "category_id", "category_name", "reserve_run_id"):
+    for attr in (
+        "client_id",
+        "client_name",
+        "sku_id",
+        "category_id",
+        "category_name",
+        "reserve_run_id",
+    ):
         value = getattr(incoming, attr)
         if value:
             setattr(merged, attr, value)
@@ -148,7 +157,9 @@ def derive_state_from_history(history: list[dict[str, Any]] | None) -> Assistant
         ):
             fields = [
                 field
-                for field in (_field_from_payload(value) for value in _as_list(response.get("missingFields")))
+                for field in (
+                    _field_from_payload(value) for value in _as_list(response.get("missingFields"))
+                )
                 if field is not None
             ]
             state.missing_fields = fields
@@ -164,7 +175,9 @@ def derive_state_from_history(history: list[dict[str, Any]] | None) -> Assistant
         state.pending_question = None
         state.missing_fields = []
 
-        source_ref = _primary_source_ref(_as_list(item.get("sourceRefs") or response.get("sourceRefs")))
+        source_ref = _primary_source_ref(
+            _as_list(item.get("sourceRefs") or response.get("sourceRefs"))
+        )
         if source_ref:
             state.last_result_ref = source_ref
             if source_ref.get("entityType") == "reserve_run":
@@ -181,7 +194,9 @@ def derive_state_from_history(history: list[dict[str, Any]] | None) -> Assistant
                     {key: value for key, value in args.items() if value not in (None, "", [])}
                 )
             state.last_filters = combined_args
-            state.last_entities = _merge_entities(state.last_entities, _entities_from_args(combined_args))
+            state.last_entities = _merge_entities(
+                state.last_entities, _entities_from_args(combined_args)
+            )
             metrics = combined_args.get("metrics") or combined_args.get("metric")
             if isinstance(metrics, list):
                 state.last_metrics = [str(item) for item in metrics]
@@ -213,7 +228,12 @@ def derive_state_from_history(history: list[dict[str, Any]] | None) -> Assistant
             if intent == "analytics_slice":
                 state.last_analytics_result_ref = source_ref
                 state.last_question_type = "analytics"
-            if intent in {"sales_summary", "period_comparison", "management_report_summary", "analytics_slice"}:
+            if intent in {
+                "sales_summary",
+                "period_comparison",
+                "management_report_summary",
+                "analytics_slice",
+            }:
                 state.comparison_base = {"intent": intent, **combined_args}
     return state
 
@@ -243,7 +263,9 @@ def merge_state(
             next_state.pending_question = None
     if params:
         next_state.last_filters.update(params)
-        next_state.last_entities = _merge_entities(next_state.last_entities, _entities_from_args(params))
+        next_state.last_entities = _merge_entities(
+            next_state.last_entities, _entities_from_args(params)
+        )
         metrics = params.get("metrics") or params.get("metric")
         if isinstance(metrics, list):
             next_state.last_metrics = [str(item) for item in metrics]
@@ -258,11 +280,12 @@ def merge_state(
         if isinstance(period, dict):
             next_state.last_period = dict(period)
         elif params.get("date_from") and params.get("date_to"):
-            next_state.last_period = {"date_from": params.get("date_from"), "date_to": params.get("date_to")}
+            next_state.last_period = {
+                "date_from": params.get("date_from"),
+                "date_to": params.get("date_to"),
+            }
         next_state.last_sort = {
-            key: params[key]
-            for key in ("sort_by", "sort_direction")
-            if params.get(key) is not None
+            key: params[key] for key in ("sort_by", "sort_direction") if params.get(key) is not None
         } or next_state.last_sort
         if params.get("limit") is not None:
             with suppress(TypeError, ValueError):
@@ -291,7 +314,14 @@ def resolve_followup_from_state(
         pending_question = (state.pending_question or "").lower()
         if state.pending_intent == "reserve_calculation" and any(
             token in pending_question
-            for token in ("пересчитай", "перерассчитай", "рассчитай", "посчитай", "calculate", "recalculate")
+            for token in (
+                "пересчитай",
+                "перерассчитай",
+                "рассчитай",
+                "посчитай",
+                "calculate",
+                "recalculate",
+            )
         ):
             resolved.setdefault("_force_tool", "calculate_reserve")
 
@@ -318,6 +348,16 @@ def resolve_followup_from_state(
             resolved.setdefault(key, value)
         resolved["metric"] = "sales_qty"
         resolved["metrics"] = ["sales_qty"]
+        if state.last_intent in {"sales_summary", "analytics_slice"}:
+            resolved.setdefault("_followup_intent", state.last_intent)
+        else:
+            resolved.setdefault("_followup_intent", "analytics_slice")
+
+    if any(token in q for token in ("в рублях", "рублях", "по выручке", "выручку", "выручка")):
+        for key, value in state.last_filters.items():
+            resolved.setdefault(key, value)
+        resolved["metric"] = "revenue"
+        resolved["metrics"] = ["revenue"]
         if state.last_intent in {"sales_summary", "analytics_slice"}:
             resolved.setdefault("_followup_intent", state.last_intent)
         else:
@@ -381,10 +421,14 @@ def resolve_followup_from_state(
             resolved.setdefault("metric", "quantity" if metric == "sales_qty" else metric)
         elif state.last_metrics:
             first_metric = state.last_metrics[0]
-            resolved.setdefault("metric", "quantity" if first_metric == "sales_qty" else first_metric)
+            resolved.setdefault(
+                "metric", "quantity" if first_metric == "sales_qty" else first_metric
+            )
         elif state.last_intent == "sales_summary":
             resolved.setdefault("metric", "revenue")
-        date_from = str(state.last_filters.get("date_from") or state.comparison_base.get("date_from") or "")
+        date_from = str(
+            state.last_filters.get("date_from") or state.comparison_base.get("date_from") or ""
+        )
         if date_from:
             current_period = date_from[:7]
             resolved.setdefault("current_period", current_period)

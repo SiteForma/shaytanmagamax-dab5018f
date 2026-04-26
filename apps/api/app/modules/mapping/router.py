@@ -127,7 +127,11 @@ def create_sku_alias_route(
         action="mapping.sku_alias_created",
         target_type="sku_alias",
         target_id=alias.id,
-        context={"alias": alias.alias, "entity_code": alias.entity_code, "entity_name": alias.entity_name},
+        context={
+            "alias": alias.alias,
+            "entity_code": alias.entity_code,
+            "entity_name": alias.entity_name,
+        },
     )
     db.commit()
     return alias
@@ -151,7 +155,11 @@ def create_client_alias_route(
         action="mapping.client_alias_created",
         target_type="client_alias",
         target_id=alias.id,
-        context={"alias": alias.alias, "entity_code": alias.entity_code, "entity_name": alias.entity_name},
+        context={
+            "alias": alias.alias,
+            "entity_code": alias.entity_code,
+            "entity_name": alias.entity_name,
+        },
     )
     db.commit()
     return alias

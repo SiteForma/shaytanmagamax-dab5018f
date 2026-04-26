@@ -12,12 +12,26 @@ class LoginRequest(ORMModel):
 
 class TokenResponse(ORMModel):
     access_token: str
+    refresh_token: str
     token_type: str = "bearer"
     user_id: str
     email: str
     full_name: str
     roles: list[str]
     capabilities: list[str]
+
+
+class AccessTokenResponse(ORMModel):
+    access_token: str
+    token_type: str = "bearer"
+
+
+class RefreshTokenRequest(ORMModel):
+    refresh_token: str = Field(min_length=1)
+
+
+class LogoutResponse(ORMModel):
+    status: str = "ok"
 
 
 class CurrentUserResponse(ORMModel):

@@ -558,6 +558,7 @@ export type AiResponseMock = AssistantResponse;
 
 export interface AuthSession {
   accessToken: string;
+  refreshToken?: string;
   tokenType: string;
   userId: ID;
   email: string;

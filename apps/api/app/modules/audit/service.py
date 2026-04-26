@@ -63,7 +63,11 @@ def serialize_audit_event(event: SystemEvent) -> AuditEventResponse:
         status=str(payload.get("status", "success")),
         request_id=payload.get("request_id"),  # type: ignore[arg-type]
         trace_id=payload.get("trace_id"),  # type: ignore[arg-type]
-        context={key: value for key, value in payload.items() if key not in {"status", "request_id", "trace_id"}},
+        context={
+            key: value
+            for key, value in payload.items()
+            if key not in {"status", "request_id", "trace_id"}
+        },
         created_at=event.created_at.isoformat(),
     )
 

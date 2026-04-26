@@ -240,7 +240,7 @@
     - role: user
       text: Какие товары в зоне дефицита?
   expect:
-    intent: analytics_slice
+    intent: stock_risk_summary
 
 - id: reserve_recalculate
   title: Пересчёт резерва
@@ -284,8 +284,7 @@
     - role: user
       text: Где не хватает остатков?
   expect:
-    intent: analytics_slice
-    tool: get_analytics_slice
+    intent: stock_risk_summary
 
 - id: stock_risky_sku
   title: SKU в зоне риска
@@ -416,8 +415,10 @@
     - role: user
       text: Что с OBI?
   expect:
-    intent: unsupported_or_ambiguous
-    status: unsupported
+    intent: analytics_slice
+    type: clarification
+    status: needs_clarification
+    must_not_include: [Я могу помочь только, Запрос вне контура, не относится к рабочим данным]
 
 - id: ambiguous_problematic
   title: Проблемные без контекста
@@ -425,7 +426,11 @@
     - role: user
       text: Покажи проблемные
   expect:
-    status: unsupported
+    intent: stock_risk_summary
+    type: clarification
+    status: needs_clarification
+    pending_intent: stock_risk_summary
+    must_not_include: [Я могу помочь только, Запрос вне контура, не относится к рабочим данным]
 
 - id: no_data_period
   title: Период без данных
@@ -495,3 +500,89 @@
     tool: get_analytics_slice
     tool_args:
       metrics: [free_stock]
+
+- id: help_no_refusal
+  title: Help не должен быть отказом
+  messages:
+    - role: user
+      text: помоги
+  expect:
+    intent: free_chat
+    status: completed
+    must_include: [продажи, резерв, SKU]
+    must_not_include: [Я могу помочь только, Запрос вне контура, не относится к рабочим данным]
+
+- id: year_close_2025_no_refusal
+  title: Итоги 2025 — рабочий вопрос
+  messages:
+    - role: user
+      text: как в целом 2025 год закрыли?
+  expect:
+    intent: management_report_summary
+    must_not_include: [Я могу помочь только, Запрос вне контура, не относится к рабочим данным]
+
+- id: short_year_question_no_refusal
+  title: Что по 2025 — рабочий вопрос
+  messages:
+    - role: user
+      text: что по 2025?
+  expect:
+    intent: management_report_summary
+    must_not_include: [Я могу помочь только, Запрос вне контура, не относится к рабочим данным]
+
+- id: month_performance_no_refusal
+  title: Как отработали март — уточнение, не отказ
+  messages:
+    - role: user
+      text: как отработали март?
+  expect:
+    intent: analytics_slice
+    type: clarification
+    status: needs_clarification
+    pending_intent: analytics_slice
+    must_not_include: [Я могу помочь только, Запрос вне контура, не относится к рабочим данным]
+
+- id: need_to_order_no_refusal
+  title: Что надо заказать — рабочий вопрос
+  messages:
+    - role: user
+      text: что надо заказать?
+  expect:
+    intent: stock_risk_summary
+    type: clarification
+    status: needs_clarification
+    pending_intent: stock_risk_summary
+    must_not_include: [Я могу помочь только, Запрос вне контура, не относится к рабочим данным]
+
+- id: drop_analysis_no_refusal
+  title: Где просели — уточнение периода
+  messages:
+    - role: user
+      text: где просели?
+  expect:
+    intent: analytics_slice
+    type: clarification
+    status: needs_clarification
+    pending_intent: analytics_slice
+    must_not_include: [Я могу помочь только, Запрос вне контура, не относится к рабочим данным]
+
+- id: client_broad_question_no_refusal
+  title: Широкий вопрос по клиенту
+  messages:
+    - role: user
+      text: как дела по Леруа?
+  expect:
+    intent: analytics_slice
+    type: clarification
+    status: needs_clarification
+    pending_intent: analytics_slice
+    must_not_include: [Я могу помочь только, Запрос вне контура, не относится к рабочим данным]
+
+- id: external_question_still_unsupported
+  title: Внешний вопрос остаётся unsupported
+  messages:
+    - role: user
+      text: кто написал Евгения Онегина?
+  expect:
+    intent: unsupported_or_ambiguous
+    status: unsupported

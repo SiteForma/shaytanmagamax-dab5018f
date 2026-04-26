@@ -31,9 +31,15 @@ from apps.api.app.modules.uploads.service import apply_upload_file, validate_upl
 
 
 def list_admin_users(db: Session) -> list[AdminUserResponse]:
-    rows = db.scalars(
-        select(User).options(joinedload(User.roles).joinedload(UserRole.role)).order_by(User.created_at.desc())
-    ).unique().all()
+    rows = (
+        db.scalars(
+            select(User)
+            .options(joinedload(User.roles).joinedload(UserRole.role))
+            .order_by(User.created_at.desc())
+        )
+        .unique()
+        .all()
+    )
     return [
         AdminUserResponse(
             id=user.id,
@@ -50,7 +56,9 @@ def list_admin_users(db: Session) -> list[AdminUserResponse]:
 
 def update_admin_user_role(db: Session, *, user_id: str, role_code: str) -> AdminUserResponse:
     user = db.scalar(
-        select(User).options(joinedload(User.roles).joinedload(UserRole.role)).where(User.id == user_id)
+        select(User)
+        .options(joinedload(User.roles).joinedload(UserRole.role))
+        .where(User.id == user_id)
     )
     if user is None:
         raise DomainError(code="user_not_found", message="Пользователь не найден", status_code=404)
@@ -62,7 +70,9 @@ def update_admin_user_role(db: Session, *, user_id: str, role_code: str) -> Admi
     db.add(UserRole(user_id=user.id, role_id=role.id))
     db.commit()
     refreshed = db.scalar(
-        select(User).options(joinedload(User.roles).joinedload(UserRole.role)).where(User.id == user_id)
+        select(User)
+        .options(joinedload(User.roles).joinedload(UserRole.role))
+        .where(User.id == user_id)
     )
     assert refreshed is not None
     return AdminUserResponse(
@@ -77,7 +87,12 @@ def update_admin_user_role(db: Session, *, user_id: str, role_code: str) -> Admi
 
 
 def _can_retry(job: JobRun) -> bool:
-    return job.job_name in {"validate_upload", "apply_upload", "refresh_analytics", "generate_export"} and job.status in {
+    return job.job_name in {
+        "validate_upload",
+        "apply_upload",
+        "refresh_analytics",
+        "generate_export",
+    } and job.status in {
         "failed",
         "completed",
     }
@@ -152,7 +167,9 @@ def retry_admin_job(db: Session, settings: Settings, *, job_id: str) -> AdminJob
     if job is None:
         raise DomainError(code="job_not_found", message="Задача не найдена", status_code=404)
     if not _can_retry(job):
-        raise DomainError(code="job_retry_not_supported", message="Безопасный retry для этой задачи не поддержан")
+        raise DomainError(
+            code="job_retry_not_supported", message="Безопасный retry для этой задачи не поддержан"
+        )
 
     file_id = str(job.payload.get("file_id", "")) if job.payload else ""
     refreshed_job: JobRun | None = None
@@ -258,7 +275,9 @@ def get_admin_health_details(db: Session, settings: Settings) -> AdminHealthDeta
         exportRoot=settings.export_root,
         exportAsyncEnabled=settings.export_async_enabled,
         exportAsyncRowThreshold=settings.export_async_row_threshold,
-        assistantProvider=settings.assistant_provider if settings.assistant_llm_enabled else "deterministic",
+        assistantProvider=(
+            settings.assistant_provider if settings.assistant_llm_enabled else "deterministic"
+        ),
         sentryEnabled=bool(settings.sentry_dsn),
         otelEnabled=settings.otel_enabled,
         startupSchemaMode=settings.startup_schema_mode,

@@ -7,6 +7,7 @@ from openpyxl import Workbook
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from apps.api.app.common.utils import utc_now
 from apps.api.app.db.models import (
     AssistantMessage,
     AssistantSession,
@@ -15,7 +16,6 @@ from apps.api.app.db.models import (
     ManagementReportRow,
     OrganizationUnit,
 )
-from apps.api.app.common.utils import utc_now
 from apps.api.app.modules.reports.management_import import import_management_report_workbook
 
 
@@ -52,12 +52,16 @@ def _create_management_report(path: Path) -> None:
 
     networks = workbook.create_sheet("Сети - разбивка по сетям")
     networks.append(["Контрагент", "2024 г.", None, "2025 г.", None, "Доля распределения", None])
-    networks.append([None, "Выручка", "Рентабельность, %", "Выручка", "Рентабельность, %", 2024, 2025])
+    networks.append(
+        [None, "Выручка", "Рентабельность, %", "Выручка", "Рентабельность, %", 2024, 2025]
+    )
     networks.append(["ЛЕМАНА ПРО", 317857500.24, 62.29, 304926556.32, 60.78, 0.696106, 0.755264])
 
     product_groups = workbook.create_sheet("Товарная группа")
     product_groups.append(["Товарная группа", "2024 г.", None, "2025 г.", None, None])
-    product_groups.append([None, "Выручка", "Рентабельность, %", "Выручка", "Рентабельность, %", None])
+    product_groups.append(
+        [None, "Выручка", "Рентабельность, %", "Выручка", "Рентабельность, %", None]
+    )
     product_groups.append(["01. Ручки мебельные", 1000, 48.0, 1500, 47.04, 0.5])
     product_groups.append(["07. Петли мебельные", 2000, 52.0, 1800, 60.69, -0.1])
     product_groups.append(["14. Толкатели и амортизаторы", 500, 57.0, 700, 65.03, 0.4])
@@ -145,7 +149,10 @@ def test_management_report_import_is_idempotent_for_same_file(
 
     assert second.import_id == first.import_id
     assert db_session.scalar(select(func.count()).select_from(ManagementReportImport)) == 1
-    assert db_session.scalar(select(func.count()).select_from(ManagementReportRow)) == first.raw_row_count
+    assert (
+        db_session.scalar(select(func.count()).select_from(ManagementReportRow))
+        == first.raw_row_count
+    )
     assert (
         db_session.scalar(select(func.count()).select_from(ManagementReportMetric))
         == first.metric_count

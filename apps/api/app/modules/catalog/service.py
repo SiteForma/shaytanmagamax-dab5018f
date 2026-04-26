@@ -95,10 +95,7 @@ def get_sku_client_split(db: Session, sku_id: str) -> list[SkuClientSplitView]:
     if not selected_rows:
         return []
 
-    sales_totals = {
-        row.client_id: row.sales_qty_6m
-        for row in selected_rows
-    }
+    sales_totals = {row.client_id: row.sales_qty_6m for row in selected_rows}
     total_sales = sum(sales_totals.values()) or 1.0
     clients = {
         client.id: client
@@ -112,7 +109,9 @@ def get_sku_client_split(db: Session, sku_id: str) -> list[SkuClientSplitView]:
     return [
         SkuClientSplitView(
             client_id=row.client_id,
-            client_name=clients.get(row.client_id).name if clients.get(row.client_id) else row.client_name,
+            client_name=(
+                clients.get(row.client_id).name if clients.get(row.client_id) else row.client_name
+            ),
             share=round((sales_totals.get(row.client_id, 0.0) / total_sales) * 100, 1),
             reserve_position=row.target_reserve_qty,
             shortage_qty=row.shortage_qty,

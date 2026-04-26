@@ -41,6 +41,7 @@ from apps.api.app.modules.assistant.schemas import (
 )
 from apps.api.app.modules.assistant.state import (
     AssistantMissingField,
+    AssistantSessionState,
     derive_state_from_history,
     merge_state,
     resolve_followup_from_state,
@@ -147,7 +148,9 @@ def _context_schema(context: AssistantResolvedContext) -> AssistantPinnedContext
     )
 
 
-def _user_for_tool_check(db: Session, current_user: User | None, created_by_id: str | None) -> User | None:
+def _user_for_tool_check(
+    db: Session, current_user: User | None, created_by_id: str | None
+) -> User | None:
     if current_user is not None:
         return current_user
     if not created_by_id:
@@ -219,13 +222,7 @@ def _dimensions_from_question(question: str) -> list[str]:
         dimensions.append("category")
     if "по клиент" in q or "клиент" in q:
         dimensions.append("client")
-    if (
-        "по sku" in q
-        or "топ sku" in q
-        or "sku" in q
-        or "хуже всего продав" in q
-        or "товар" in q
-    ):
+    if "по sku" in q or "топ sku" in q or "sku" in q or "хуже всего продав" in q or "товар" in q:
         dimensions.extend(["sku", "article"])
     if "по артик" in q or "артикул" in q:
         dimensions.append("article")
@@ -276,7 +273,9 @@ def _params_from_route(
         params.pop("dimensions", None)
         params.pop("dimension", None)
         parsed = parse_period_text(question, default_year=_default_year_from_params(params))
-        params.update({key: value for key, value in parsed.as_range_params().items() if key not in params})
+        params.update(
+            {key: value for key, value in parsed.as_range_params().items() if key not in params}
+        )
         metric = _metric_from_question(question)
         if metric:
             params.setdefault("metric", metric)
@@ -320,8 +319,16 @@ def _params_from_route(
         if dimensions:
             params.setdefault("dimensions", dimensions)
         elif not params.get("dimensions") and not params.get("dimension"):
-            selected_metrics = [str(item) for item in params.get("metrics", [])] if isinstance(params.get("metrics"), list) else []
-            metric_source = METRIC_CATALOG.get(selected_metrics[0]).source if selected_metrics and selected_metrics[0] in METRIC_CATALOG else "sales"
+            selected_metrics = (
+                [str(item) for item in params.get("metrics", [])]
+                if isinstance(params.get("metrics"), list)
+                else []
+            )
+            metric_source = (
+                METRIC_CATALOG.get(selected_metrics[0]).source
+                if selected_metrics and selected_metrics[0] in METRIC_CATALOG
+                else "sales"
+            )
             if metric_source == "sales":
                 params.setdefault("dimensions", [] if params.get("client_id") else ["client"])
             elif metric_source == "stock":
@@ -390,6 +397,146 @@ def _compose_clarification(
         context_used=bundle.context,
         missing_fields=[field.to_payload() for field in missing_fields],
         suggested_chips=_clarification_chips(missing_fields),
+        pending_intent=intent,
+    )
+
+
+def _state_has_context(state: AssistantSessionState) -> bool:
+    return bool(
+        state.pending_intent
+        or state.last_intent
+        or state.last_filters
+        or state.last_period
+        or state.last_metrics
+        or state.last_entities.to_params()
+    )
+
+
+def _business_clarification_spec(
+    question: str,
+    state: AssistantSessionState,
+) -> tuple[str, str, list[str], str] | None:
+    q = question.lower().replace("ё", "е").strip()
+    if not q or _state_has_context(state):
+        return None
+    has_period_hint = any(
+        token in q
+        for token in (
+            "январ",
+            "феврал",
+            "март",
+            "апрел",
+            "май",
+            "мая",
+            "июн",
+            "июл",
+            "август",
+            "сентябр",
+            "октябр",
+            "ноябр",
+            "декабр",
+            "2024",
+            "2025",
+            "прошл",
+            "текущ",
+            "этот месяц",
+            "последние",
+        )
+    )
+
+    if any(
+        token in q
+        for token in (
+            "как отработали",
+            "что с март",
+            "что по март",
+            "что с феврал",
+            "что по феврал",
+        )
+    ):
+        return (
+            "metric",
+            "Что посмотреть за период: выручку, продажи в штуках, клиентов, категории или проблемные SKU?",
+            ["Выручка", "Продажи в штуках", "По клиентам", "По категориям", "Проблемные SKU"],
+            "analytics_slice",
+        )
+
+    if not has_period_hint and any(
+        token in q
+        for token in ("где просели", "что просело", "кто просел", "просели", "по падению")
+    ):
+        return (
+            "period",
+            "За какой период проверить падение?",
+            ["Март 2025", "2025 год", "Последние 3 месяца", "По клиентам", "По категориям"],
+            "analytics_slice",
+        )
+
+    if any(token in q for token in ("покажи проблемные", "что проблемное", "проблемные")):
+        return (
+            "problem_scope",
+            "Проблемные по какому признаку: дефицит, остатки, падение продаж или качество данных?",
+            ["Дефицит", "Остатки", "Падение продаж", "Качество данных"],
+            "stock_risk_summary",
+        )
+
+    if any(token in q for token in ("что надо заказать", "что заказать", "кого заказать")):
+        return (
+            "order_basis",
+            "Сформировать список к заказу по дефициту резерва, низкому остатку или с учётом поставок?",
+            ["Дефицит резерва", "Низкий остаток", "С учётом поставок"],
+            "stock_risk_summary",
+        )
+
+    if "как дела" in q or q in {"что происходит", "что с"}:
+        return (
+            "business_area",
+            "Что посмотреть: продажи, резерв, остатки, дефицит или итоги периода?",
+            ["Продажи", "Резерв", "Остатки", "Дефицит", "Итоги 2025"],
+            "analytics_slice",
+        )
+
+    return None
+
+
+def _compose_business_clarification(
+    *,
+    intent: str,
+    field_name: str,
+    question: str,
+    chips: list[str],
+    bundle: AssistantContextBundle,
+) -> AssistantAnswerDraft:
+    missing_field = AssistantMissingField(
+        name=field_name,
+        label=field_name,
+        question=question,
+    )
+    return AssistantAnswerDraft(
+        intent=intent,  # type: ignore[arg-type]
+        status="needs_clarification",
+        response_type="clarification",
+        confidence=0.7,
+        title="Уточните срез",
+        summary=question,
+        sections=[
+            _section(
+                section_type="clarification",
+                title="Что уточнить",
+                body=question,
+                items=chips,
+            )
+        ],
+        source_refs=[],
+        tool_calls=[],
+        followups=[
+            {"id": f"chip_{index}", "label": chip, "prompt": chip, "action": "query"}
+            for index, chip in enumerate(chips)
+        ],
+        warnings=[],
+        context_used=bundle.context,
+        missing_fields=[missing_field.to_payload()],
+        suggested_chips=chips,
         pending_intent=intent,
     )
 
@@ -493,7 +640,9 @@ def _dedupe_source_refs(executions: list[AssistantToolExecution]) -> list[dict[s
     return list(seen.values())
 
 
-def _collect_warnings(bundle: AssistantContextBundle, executions: list[AssistantToolExecution]) -> list[AssistantWarningData]:
+def _collect_warnings(
+    bundle: AssistantContextBundle, executions: list[AssistantToolExecution]
+) -> list[AssistantWarningData]:
     warnings: list[AssistantWarningData] = [*bundle.warnings]
     for execution in executions:
         warnings.extend(execution.warnings)
@@ -547,7 +696,11 @@ def _generic_followups(intent: str, bundle: AssistantContextBundle) -> list[dict
                 "label": "Открыть SKU",
                 "prompt": "Суммируй ситуацию по этому SKU",
                 "action": "query",
-                "route": f"/sku?sku={bundle.context.selected_sku_id}" if bundle.context.selected_sku_id else None,
+                "route": (
+                    f"/sku?sku={bundle.context.selected_sku_id}"
+                    if bundle.context.selected_sku_id
+                    else None
+                ),
             },
             {
                 "id": "inbound_impact",
@@ -703,9 +856,7 @@ def _reserve_rows_totals(rows: list[object], fallback: dict[str, object]) -> dic
         return fallback
     positions = len(rows)
     at_risk = sum(
-        1
-        for row in rows
-        if getattr(row, "status", "") in {"critical", "warning", "no_history"}
+        1 for row in rows if getattr(row, "status", "") in {"critical", "warning", "no_history"}
     )
     total_shortage = sum(float(getattr(row, "shortage_qty", 0) or 0) for row in rows)
     coverage_values = [
@@ -718,7 +869,9 @@ def _reserve_rows_totals(rows: list[object], fallback: dict[str, object]) -> dic
         "positions": positions,
         "positions_at_risk": at_risk,
         "total_shortage_qty": total_shortage,
-        "avg_coverage_months": sum(coverage_values) / len(coverage_values) if coverage_values else None,
+        "avg_coverage_months": (
+            sum(coverage_values) / len(coverage_values) if coverage_values else None
+        ),
     }
 
 
@@ -727,10 +880,10 @@ def _compose_unsupported(bundle: AssistantContextBundle) -> AssistantAnswerDraft
         intent="unsupported_or_ambiguous",
         status="unsupported",
         confidence=0.82,
-        title="Не по рабочим данным MAGAMAX",
+        title="Не по данным MAGAMAX",
         summary=(
-            "Я могу помочь только с работой MAGAMAX: загрузками, продажами, резервами, SKU, "
-            "складом, поставками, качеством данных и расчётами по этим данным."
+            "Это вне моей рабочей зоны. Могу помочь по MAGAMAX: продажи, резерв, склад, поставки, "
+            "загрузки, качество данных и управленческие отчёты."
         ),
         sections=[
             _section(
@@ -770,10 +923,11 @@ def _compose_free_chat(bundle: AssistantContextBundle, question: str) -> Assista
     sections = [
         _section(
             section_type="narrative",
-            title="Контур MAGAMAX",
+            title="Чем могу помочь",
             body=(
-                "Я могу помочь по данным MAGAMAX: загрузкам, товарам, складу, поставкам, резервам и отчётам. "
-                "Задайте вопрос обычными словами."
+                "Я могу помочь как внутренний аналитик MAGAMAX. Напишите обычными словами, что посмотреть: "
+                "продажи и выручку, клиентов и сети DIY, SKU и категории, остатки и покрытие склада, "
+                "резерв и дефицит, входящие поставки, качество данных или управленческий отчёт."
             ),
         )
     ]
@@ -788,11 +942,15 @@ def _compose_free_chat(bundle: AssistantContextBundle, question: str) -> Assista
     sections.append(
         _section(
             section_type="next_actions",
-            title="Как получить точный ответ по данным",
+            title="Примеры",
             items=[
-                "Для расчёта укажите клиента и SKU или закрепите их справа в контексте.",
-                "Для объяснения риска спросите: «Почему эта позиция критична?» при выбранном SKU.",
-                "Для данных по поставкам спросите: «Какие inbound поставки снижают дефицит?»",
+                "Как в целом закрыли 2025 год?",
+                "Покажи продажи по OBI за март 2025.",
+                "Какие SKU в зоне риска?",
+                "Почему такой резерв?",
+                "Что просело по категориям?",
+                "Что пришло на склад и что закрывает дефицит?",
+                "Какие товары нужно заказать?",
             ],
         )
     )
@@ -801,9 +959,7 @@ def _compose_free_chat(bundle: AssistantContextBundle, question: str) -> Assista
         status="completed",
         confidence=0.68,
         title="MAGAMAX AI",
-        summary=(
-            "Могу помочь по данным MAGAMAX. Напишите вопрос обычными словами."
-        ),
+        summary="Я внутренний аналитик MAGAMAX: могу смотреть продажи, резерв, SKU, склад, поставки, качество данных и отчёты.",
         sections=sections,
         source_refs=[],
         tool_calls=[],
@@ -877,7 +1033,11 @@ def _compose_answer(
             status="completed" if useful_sections else "partial",
             confidence=0.9 if useful_sections else 0.6,
             title="Что есть в БД",
-            summary=narrative if useful_sections else "В БД не найдено наполненных аналитических источников.",
+            summary=(
+                narrative
+                if useful_sections
+                else "В БД не найдено наполненных аналитических источников."
+            ),
             sections=sections,
             source_refs=source_refs,
             tool_calls=executions,
@@ -911,7 +1071,9 @@ def _compose_answer(
                 context_used=bundle.context,
             )
         totals = _reserve_rows_totals(calculation.rows, calculation.run.summary_payload)
-        is_recalculation = primary_execution.tool_name == "calculate_reserve" if primary_execution else False
+        is_recalculation = (
+            primary_execution.tool_name == "calculate_reserve" if primary_execution else False
+        )
         sections = [
             _section(
                 section_type="narrative",
@@ -937,7 +1099,11 @@ def _compose_answer(
                         "shortage",
                         "Дефицит",
                         f"{_qty(totals.get('total_shortage_qty'))} шт.",
-                        "critical" if float(totals.get("total_shortage_qty", 0) or 0) > 0 else "positive",
+                        (
+                            "critical"
+                            if float(totals.get("total_shortage_qty", 0) or 0) > 0
+                            else "positive"
+                        ),
                     ),
                     _metric(
                         "coverage",
@@ -987,7 +1153,8 @@ def _compose_answer(
                     _section(
                         section_type="warning_block",
                         title="Что мешает объяснению",
-                        items=[warning.message for warning in warnings] or ["Уточните SKU или клиента."],
+                        items=[warning.message for warning in warnings]
+                        or ["Уточните SKU или клиента."],
                     )
                 ],
                 source_refs=source_refs,
@@ -997,7 +1164,9 @@ def _compose_answer(
                 context_used=bundle.context,
             )
         row = payload["row"]
-        warning_items = list(row.explanation_payload.get("warnings", [])) + [warning.message for warning in warnings]
+        warning_items = list(row.explanation_payload.get("warnings", [])) + [
+            warning.message for warning in warnings
+        ]
         sections = [
             _section(
                 section_type="narrative",
@@ -1060,10 +1229,22 @@ def _compose_answer(
                 section_type="metric_summary",
                 title="SKU в цифрах",
                 metrics=[
-                    _metric("free_stock", "Свободный остаток", f"{_qty(detail.stock.free_stock if detail.stock else 0)} шт."),
+                    _metric(
+                        "free_stock",
+                        "Свободный остаток",
+                        f"{_qty(detail.stock.free_stock if detail.stock else 0)} шт.",
+                    ),
                     _metric("inbound", "Входящие поставки", str(len(detail.inbound))),
-                    _metric("coverage", "Среднее покрытие", f"{_qty(reserve_summary.avg_coverage_months if reserve_summary else None)} мес."),
-                    _metric("clients", "Клиентов под риском", str(reserve_summary.affected_clients_count if reserve_summary else 0)),
+                    _metric(
+                        "coverage",
+                        "Среднее покрытие",
+                        f"{_qty(reserve_summary.avg_coverage_months if reserve_summary else None)} мес.",
+                    ),
+                    _metric(
+                        "clients",
+                        "Клиентов под риском",
+                        str(reserve_summary.affected_clients_count if reserve_summary else 0),
+                    ),
                 ],
             ),
             _section(
@@ -1110,8 +1291,18 @@ def _compose_answer(
                         section_type="metric_summary",
                         title="Общая сводка",
                         metrics=[
-                            _metric("positions_at_risk", "Под риском", str(overview.summary.positions_at_risk), "warning"),
-                            _metric("shortage", "Дефицит", f"{_qty(overview.summary.total_shortage_qty)} шт.", "critical"),
+                            _metric(
+                                "positions_at_risk",
+                                "Под риском",
+                                str(overview.summary.positions_at_risk),
+                                "warning",
+                            ),
+                            _metric(
+                                "shortage",
+                                "Дефицит",
+                                f"{_qty(overview.summary.total_shortage_qty)} шт.",
+                                "critical",
+                            ),
                         ],
                     )
                 )
@@ -1242,8 +1433,15 @@ def _compose_answer(
                 section_type="metric_summary",
                 title="Ключевые метрики",
                 metrics=[
-                    _metric("positions", "Позиции", str(len(rows)), "warning" if rows else "positive"),
-                    _metric("shortage", "Дефицит", f"{_qty(total_shortage)} шт.", "critical" if total_shortage else "positive"),
+                    _metric(
+                        "positions", "Позиции", str(len(rows)), "warning" if rows else "positive"
+                    ),
+                    _metric(
+                        "shortage",
+                        "Дефицит",
+                        f"{_qty(total_shortage)} шт.",
+                        "critical" if total_shortage else "positive",
+                    ),
                 ],
             ),
             _section(
@@ -1299,7 +1497,12 @@ def _compose_answer(
                 title="Ключевые метрики",
                 metrics=[
                     _metric("quantity", "Количество", f"{_qty(quantity)} шт."),
-                    _metric("revenue", "Выручка", _metric_value(revenue, "rub"), "positive" if revenue else "neutral"),
+                    _metric(
+                        "revenue",
+                        "Выручка",
+                        _metric_value(revenue, "rub"),
+                        "positive" if revenue else "neutral",
+                    ),
                     _metric("rows", "Строк", str(row_count)),
                 ],
             ),
@@ -1359,19 +1562,42 @@ def _compose_answer(
                 warnings=warnings,
                 context_used=bundle.context,
                 missing_fields=[],
-                suggested_chips=["выручка по клиентам", "продажи в штуках по категориям", "дефицит по SKU"],
+                suggested_chips=[
+                    "выручка по клиентам",
+                    "продажи в штуках по категориям",
+                    "дефицит по SKU",
+                ],
                 pending_intent="analytics_slice",
             )
         primary_metric = str(metrics[0]) if metrics else "metric"
         top_row = rows[0] if rows else {}
-        top_label = " / ".join(str(top_row.get(dimension) or "—") for dimension in dimensions) if top_row else "нет данных"
+        top_label = (
+            " / ".join(str(top_row.get(dimension) or "—") for dimension in dimensions)
+            if top_row
+            else "нет данных"
+        )
         top_value = top_row.get(primary_metric) if isinstance(top_row, dict) else None
-        primary_unit = METRIC_CATALOG.get(primary_metric).unit if primary_metric in METRIC_CATALOG else "qty"
+        primary_unit = (
+            METRIC_CATALOG.get(primary_metric).unit if primary_metric in METRIC_CATALOG else "qty"
+        )
         metric_cards = [
             _metric(
                 str(metric),
-                METRIC_CATALOG.get(str(metric)).label if str(metric) in METRIC_CATALOG else str(metric),
-                _metric_value(totals.get(str(metric), top_row.get(str(metric), 0) if isinstance(top_row, dict) else 0), METRIC_CATALOG.get(str(metric)).unit if str(metric) in METRIC_CATALOG else "qty"),
+                (
+                    METRIC_CATALOG.get(str(metric)).label
+                    if str(metric) in METRIC_CATALOG
+                    else str(metric)
+                ),
+                _metric_value(
+                    totals.get(
+                        str(metric), top_row.get(str(metric), 0) if isinstance(top_row, dict) else 0
+                    ),
+                    (
+                        METRIC_CATALOG.get(str(metric)).unit
+                        if str(metric) in METRIC_CATALOG
+                        else "qty"
+                    ),
+                ),
                 "positive" if float(totals.get(str(metric), 0) or 0) else "neutral",
             )
             for metric in metrics
@@ -1415,7 +1641,9 @@ def _compose_answer(
     if bundle.route.intent == "period_comparison":
         payload = tool_map["get_period_comparison"].payload or {}
         current_value = float(payload.get("current_value") or 0) if isinstance(payload, dict) else 0
-        previous_value = float(payload.get("previous_value") or 0) if isinstance(payload, dict) else 0
+        previous_value = (
+            float(payload.get("previous_value") or 0) if isinstance(payload, dict) else 0
+        )
         delta = float(payload.get("delta") or 0) if isinstance(payload, dict) else 0
         delta_pct = payload.get("delta_pct") if isinstance(payload, dict) else None
         metric = str(payload.get("metric") or "revenue") if isinstance(payload, dict) else "revenue"
@@ -1437,7 +1665,12 @@ def _compose_answer(
                 metrics=[
                     _metric("current", "Текущий", _metric_value(current_value, unit)),
                     _metric("previous", "Предыдущий", _metric_value(previous_value, unit)),
-                    _metric("delta", "Разница", _metric_value(delta, unit), "positive" if delta >= 0 else "warning"),
+                    _metric(
+                        "delta",
+                        "Разница",
+                        _metric_value(delta, unit),
+                        "positive" if delta >= 0 else "warning",
+                    ),
                     _metric("delta_pct", "Изменение", delta_text),
                 ],
             ),
@@ -1459,7 +1692,9 @@ def _compose_answer(
     if bundle.route.intent == "upload_status_summary":
         details = tool_map["get_upload_status"].payload or []
         dashboard = tool_map.get("get_dashboard_summary")
-        freshness_hours = dashboard.payload.freshness.freshness_hours if dashboard and dashboard.payload else None
+        freshness_hours = (
+            dashboard.payload.freshness.freshness_hours if dashboard and dashboard.payload else None
+        )
         sections = [
             _section(
                 section_type="narrative",
@@ -1570,16 +1805,27 @@ def _compose_answer(
         metrics = payload.get("metrics") or []
         answer_focus = payload.get("answer_focus") if isinstance(payload, dict) else None
         key_metrics = getattr(summary_payload, "key_metrics", []) if summary_payload else []
-        organization_units = getattr(summary_payload, "organization_units", []) if summary_payload else []
-        metric_counts_by_sheet = getattr(summary_payload, "metric_counts_by_sheet", {}) if summary_payload else {}
-        if isinstance(answer_focus, dict) and answer_focus.get("kind") == "top_product_group_earnings":
+        organization_units = (
+            getattr(summary_payload, "organization_units", []) if summary_payload else []
+        )
+        metric_counts_by_sheet = (
+            getattr(summary_payload, "metric_counts_by_sheet", {}) if summary_payload else {}
+        )
+        if (
+            isinstance(answer_focus, dict)
+            and answer_focus.get("kind") == "top_product_group_earnings"
+        ):
             year = answer_focus.get("year") or "выбранный год"
-            ranked_rows = answer_focus.get("rows") if isinstance(answer_focus.get("rows"), list) else []
+            ranked_rows = (
+                answer_focus.get("rows") if isinstance(answer_focus.get("rows"), list) else []
+            )
             try:
                 requested_rank = max(int(answer_focus.get("requestedRank") or 1), 1)
             except (TypeError, ValueError):
                 requested_rank = 1
-            selected_row = ranked_rows[requested_rank - 1] if len(ranked_rows) >= requested_rank else None
+            selected_row = (
+                ranked_rows[requested_rank - 1] if len(ranked_rows) >= requested_rank else None
+            )
             metric_rows = [
                 {
                     "rank": index + 1,
@@ -1606,9 +1852,7 @@ def _compose_answer(
                         f"{_metric_value(selected_row.get('estimatedProfitRub'), 'rub')}."
                     )
             else:
-                summary_text = (
-                    f"В управленческом отчёте нет {requested_rank}-го места по расчётному заработку за {year}."
-                )
+                summary_text = f"В управленческом отчёте нет {requested_rank}-го места по расчётному заработку за {year}."
             sections = [
                 _section(
                     section_type="narrative",
@@ -1633,9 +1877,11 @@ def _compose_answer(
                 intent="management_report_summary",
                 status="completed" if selected_row is not None else "partial",
                 confidence=0.9 if selected_row is not None else 0.62,
-                title=f"Где заработали больше всего в {year}"
-                if requested_rank == 1
-                else f"{requested_rank}-е место по заработку, {year}",
+                title=(
+                    f"Где заработали больше всего в {year}"
+                    if requested_rank == 1
+                    else f"{requested_rank}-е место по заработку, {year}"
+                ),
                 summary=summary_text,
                 sections=sections,
                 source_refs=source_refs,
@@ -1645,13 +1891,18 @@ def _compose_answer(
                 context_used=bundle.context,
             )
 
-        if isinstance(answer_focus, dict) and answer_focus.get("kind") == "top_product_group_profitability":
+        if (
+            isinstance(answer_focus, dict)
+            and answer_focus.get("kind") == "top_product_group_profitability"
+        ):
             year = answer_focus.get("year") or "выбранный год"
             try:
                 requested_rank = max(int(answer_focus.get("requestedRank") or 1), 1)
             except (TypeError, ValueError):
                 requested_rank = 1
-            selected_metric = metrics[requested_rank - 1] if len(metrics) >= requested_rank else None
+            selected_metric = (
+                metrics[requested_rank - 1] if len(metrics) >= requested_rank else None
+            )
             metric_rows = [
                 {
                     "rank": index + 1,
@@ -1662,7 +1913,9 @@ def _compose_answer(
                 for index, item in enumerate(metrics[:8])
             ]
             if selected_metric is not None:
-                selected_value = _metric_value(selected_metric.metric_value, selected_metric.metric_unit)
+                selected_value = _metric_value(
+                    selected_metric.metric_value, selected_metric.metric_unit
+                )
                 if requested_rank == 1:
                     summary_text = (
                         f"По рентабельности в {year} самая выгодная товарная группа — "
@@ -1674,9 +1927,7 @@ def _compose_answer(
                         f"{selected_metric.dimension_name} — {selected_value}."
                     )
             else:
-                summary_text = (
-                    f"В управленческом отчёте нет {requested_rank}-го места по рентабельности товарных групп за {year}."
-                )
+                summary_text = f"В управленческом отчёте нет {requested_rank}-го места по рентабельности товарных групп за {year}."
             sections = [
                 _section(
                     section_type="narrative",
@@ -1701,9 +1952,11 @@ def _compose_answer(
                 intent="management_report_summary",
                 status="completed" if selected_metric is not None else "partial",
                 confidence=0.91 if selected_metric is not None else 0.62,
-                title=f"Самая выгодная ТГ в {year}"
-                if requested_rank == 1
-                else f"{requested_rank}-е место по рентабельности ТГ, {year}",
+                title=(
+                    f"Самая выгодная ТГ в {year}"
+                    if requested_rank == 1
+                    else f"{requested_rank}-е место по рентабельности ТГ, {year}"
+                ),
                 summary=summary_text,
                 sections=sections,
                 source_refs=source_refs,
@@ -1945,15 +2198,13 @@ def _apply_history_fallback_plan(
 
     previous_contextual_user_text = _previous_contextual_user_text(history)
     should_repair_previous_followup = (
-        _is_repair_followup_request(question)
-        and previous_contextual_user_text is not None
+        _is_repair_followup_request(question) and previous_contextual_user_text is not None
     )
-    should_apply_context = _is_contextual_followup_request(question) or should_repair_previous_followup
+    should_apply_context = (
+        _is_contextual_followup_request(question) or should_repair_previous_followup
+    )
 
-    if (
-        deterministic_intent in {"free_chat", "unsupported_or_ambiguous"}
-        and should_apply_context
-    ):
+    if deterministic_intent in {"free_chat", "unsupported_or_ambiguous"} and should_apply_context:
         previous_domain = _last_domain_history_item(history)
         if previous_domain is not None:
             intent = str(previous_domain.get("intent") or intent)
@@ -1962,7 +2213,9 @@ def _apply_history_fallback_plan(
                 or _previous_domain_tool_question(previous_domain)
                 or _previous_user_text(history)
             )
-            semantic_followup = previous_contextual_user_text if should_repair_previous_followup else question
+            semantic_followup = (
+                previous_contextual_user_text if should_repair_previous_followup else question
+            )
             if base_question:
                 tool_question = f"{base_question}. Follow-up: {semantic_followup}"
     return intent, tool_question
@@ -2051,7 +2304,10 @@ def execute_assistant_query(
         history=history_items,
     )
     state_params = resolve_followup_from_state(question, session_state, plan.params)
-    if state_params.get("_pending_intent") and plan.intent in {"free_chat", "unsupported_or_ambiguous"}:
+    if state_params.get("_pending_intent") and plan.intent in {
+        "free_chat",
+        "unsupported_or_ambiguous",
+    }:
         plan.intent = str(state_params["_pending_intent"])  # type: ignore[assignment]
     if state_params.get("_followup_intent") and (
         plan.intent in {"free_chat", "unsupported_or_ambiguous"}
@@ -2078,6 +2334,38 @@ def execute_assistant_query(
         plan_params=plan.params,
         state_params=state_params,
     )
+    business_clarification = _business_clarification_spec(question, session_state)
+    if business_clarification:
+        field_name, clarification_question, suggested_chips, pending_intent = business_clarification
+        draft = _compose_business_clarification(
+            intent=pending_intent,
+            field_name=field_name,
+            question=clarification_question,
+            chips=suggested_chips,
+            bundle=bundle,
+        )
+        draft.trace_metadata = _trace_metadata(
+            resolved_intent=pending_intent,
+            resolved_tool=None,
+            missing_fields=[
+                AssistantMissingField(
+                    name=field_name,
+                    label=field_name,
+                    question=clarification_question,
+                )
+            ],
+            clarification_reason="broad_business_question",
+            source_refs_count=0,
+        )
+        token_usage = combine_token_usage(plan.token_usage)
+        return _response_from_draft(
+            payload=payload,
+            draft=draft,
+            provider_name="deterministic",
+            token_usage=token_usage,
+            trace_id=trace_id,
+        )
+
     tool_names = _execution_plan(route.intent, plan.tool_names, tool_question, params)
     primary_tool_name = tool_names[0] if tool_names else None
     missing_fields: list[AssistantMissingField] = []
@@ -2111,7 +2399,9 @@ def execute_assistant_query(
             clarification_reason="required_fields_missing",
             source_refs_count=len(draft.source_refs),
         )
-        draft, provider_name, _provider_warnings, finalize_usage = finalize_with_provider(settings, draft)
+        draft, provider_name, _provider_warnings, finalize_usage = finalize_with_provider(
+            settings, draft
+        )
         token_usage = combine_token_usage(plan.token_usage, finalize_usage)
         return _response_from_draft(
             payload=payload,
@@ -2124,7 +2414,9 @@ def execute_assistant_query(
     executions: list[AssistantToolExecution] = []
     for tool_name in tool_names:
         spec = registry.lookup(tool_name)
-        tool_params = params if spec.intent == route.intent or tool_name == primary_tool_name else {}
+        tool_params = (
+            params if spec.intent == route.intent or tool_name == primary_tool_name else {}
+        )
         executions.append(
             _dispatch_tool(
                 db,
@@ -2143,7 +2435,9 @@ def execute_assistant_query(
         missing_fields=[],
         source_refs_count=len(draft.source_refs),
     )
-    draft, provider_name, _provider_warnings, finalize_usage = finalize_with_provider(settings, draft)
+    draft, provider_name, _provider_warnings, finalize_usage = finalize_with_provider(
+        settings, draft
+    )
     token_usage = combine_token_usage(plan.token_usage, finalize_usage)
 
     return _response_from_draft(

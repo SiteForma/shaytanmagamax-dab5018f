@@ -74,7 +74,9 @@ def _find_month_token(text: str) -> tuple[str, int] | None:
     return None
 
 
-def _range_payload(start: date, end_marker: date, label: str, granularity: str = "month") -> ParsedPeriod:
+def _range_payload(
+    start: date, end_marker: date, label: str, granularity: str = "month"
+) -> ParsedPeriod:
     return ParsedPeriod(
         date_from=start.isoformat(),
         date_to=end_marker.isoformat(),
@@ -107,7 +109,9 @@ def parse_period_text(
 
     if "прошлый месяц" in q or "прошлым месяц" in q:
         year, month = _add_months(today.year, today.month, -1)
-        return _range_payload(_month_start(year, month), _month_end_marker(year, month), "прошлый месяц")
+        return _range_payload(
+            _month_start(year, month), _month_end_marker(year, month), "прошлый месяц"
+        )
 
     recent_match = re.search(r"последн(?:ие|их|ий)?\s+(\d+)\s+месяц", q)
     if recent_match:
@@ -154,7 +158,11 @@ def parse_period_text(
     if month_token:
         _, month = month_token
         year = _find_year(q, default_year)
-        return _range_payload(_month_start(year, month), _month_end_marker(year, month), f"{_month_label(month)} {year}")
+        return _range_payload(
+            _month_start(year, month),
+            _month_end_marker(year, month),
+            f"{_month_label(month)} {year}",
+        )
 
     year_match = re.search(r"\b(20\d{2})\b(?:\s*(?:год|г\.?))?", q)
     if year_match:

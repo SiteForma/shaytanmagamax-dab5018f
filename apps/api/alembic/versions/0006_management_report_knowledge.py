@@ -59,11 +59,17 @@ def upgrade() -> None:
         sa.Column("notes", sa.Text(), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
-        sa.ForeignKeyConstraint(["import_id"], ["management_report_imports.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(
+            ["import_id"], ["management_report_imports.id"], ondelete="CASCADE"
+        ),
         sa.PrimaryKeyConstraint("id"),
     )
-    op.create_index(op.f("ix_management_report_rows_import_id"), "management_report_rows", ["import_id"])
-    op.create_index(op.f("ix_management_report_rows_sheet_name"), "management_report_rows", ["sheet_name"])
+    op.create_index(
+        op.f("ix_management_report_rows_import_id"), "management_report_rows", ["import_id"]
+    )
+    op.create_index(
+        op.f("ix_management_report_rows_sheet_name"), "management_report_rows", ["sheet_name"]
+    )
 
     op.create_table(
         "organization_units",
@@ -107,7 +113,9 @@ def upgrade() -> None:
         sa.Column("raw_payload", sa.JSON(), nullable=False, server_default=sa.text("'{}'")),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
-        sa.ForeignKeyConstraint(["import_id"], ["management_report_imports.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(
+            ["import_id"], ["management_report_imports.id"], ondelete="CASCADE"
+        ),
         sa.ForeignKeyConstraint(
             ["source_row_id"],
             ["management_report_rows.id"],

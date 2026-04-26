@@ -21,12 +21,18 @@ def upgrade() -> None:
     columns = _column_names("inbound_deliveries")
 
     if "container_ref" not in columns:
-        op.add_column("inbound_deliveries", sa.Column("container_ref", sa.String(length=120), nullable=True))
-        op.create_index(op.f("ix_inbound_deliveries_container_ref"), "inbound_deliveries", ["container_ref"])
+        op.add_column(
+            "inbound_deliveries", sa.Column("container_ref", sa.String(length=120), nullable=True)
+        )
+        op.create_index(
+            op.f("ix_inbound_deliveries_container_ref"), "inbound_deliveries", ["container_ref"]
+        )
     if "free_stock_after_allocation_qty" not in columns:
         op.add_column(
             "inbound_deliveries",
-            sa.Column("free_stock_after_allocation_qty", sa.Float(), nullable=False, server_default="0"),
+            sa.Column(
+                "free_stock_after_allocation_qty", sa.Float(), nullable=False, server_default="0"
+            ),
         )
     if "client_order_qty" not in columns:
         op.add_column(
@@ -34,11 +40,15 @@ def upgrade() -> None:
             sa.Column("client_order_qty", sa.Float(), nullable=False, server_default="0"),
         )
     if "sheet_status" not in columns:
-        op.add_column("inbound_deliveries", sa.Column("sheet_status", sa.String(length=120), nullable=True))
+        op.add_column(
+            "inbound_deliveries", sa.Column("sheet_status", sa.String(length=120), nullable=True)
+        )
     if "client_allocations" not in columns:
         op.add_column(
             "inbound_deliveries",
-            sa.Column("client_allocations", sa.JSON(), nullable=False, server_default=sa.text("'{}'")),
+            sa.Column(
+                "client_allocations", sa.JSON(), nullable=False, server_default=sa.text("'{}'")
+            ),
         )
     if "raw_payload" not in columns:
         op.add_column(

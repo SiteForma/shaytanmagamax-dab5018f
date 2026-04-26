@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from uuid import uuid4
 
 from sqlalchemy import (
     JSON,
@@ -65,6 +66,20 @@ class UserRole(Base):
     )
     user: Mapped[User] = relationship(back_populates="roles")
     role: Mapped[Role] = relationship()
+
+
+class RefreshToken(Base):
+    __tablename__ = "refresh_tokens"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    user: Mapped[User] = relationship()
 
 
 class AccessPolicy(TimestampMixin, Base):
@@ -381,7 +396,9 @@ class InboundDelivery(TimestampMixin, Base):
     client_allocations: Mapped[dict[str, object]] = mapped_column(
         MutableDict.as_mutable(JSON), default=dict
     )
-    raw_payload: Mapped[dict[str, object]] = mapped_column(MutableDict.as_mutable(JSON), default=dict)
+    raw_payload: Mapped[dict[str, object]] = mapped_column(
+        MutableDict.as_mutable(JSON), default=dict
+    )
 
 
 class ReserveRun(TimestampMixin, Base):
@@ -480,9 +497,7 @@ class JobRun(TimestampMixin, Base):
     job_name: Mapped[str] = mapped_column(String(128), index=True)
     queue_name: Mapped[str] = mapped_column(String(128), default="default")
     status: Mapped[str] = mapped_column(String(32), default="queued")
-    payload: Mapped[dict[str, object]] = mapped_column(
-        MutableDict.as_mutable(JSON), default=dict
-    )
+    payload: Mapped[dict[str, object]] = mapped_column(MutableDict.as_mutable(JSON), default=dict)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -533,9 +548,7 @@ class ManagementReportRow(TimestampMixin, Base):
 
 class OrganizationUnit(TimestampMixin, Base):
     __tablename__ = "organization_units"
-    __table_args__ = (
-        UniqueConstraint("unit_type", "code", name="uq_organization_unit_type_code"),
-    )
+    __table_args__ = (UniqueConstraint("unit_type", "code", name="uq_organization_unit_type_code"),)
 
     id: Mapped[str] = mapped_column(
         String(40), primary_key=True, default=lambda: generate_id("org")
@@ -612,7 +625,9 @@ class AssistantSession(TimestampMixin, Base):
     id: Mapped[str] = mapped_column(
         String(40), primary_key=True, default=lambda: generate_id("asess")
     )
-    created_by_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    created_by_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True, index=True
+    )
     title: Mapped[str] = mapped_column(String(255), default="Новая сессия")
     status: Mapped[str] = mapped_column(String(32), default="active", index=True)
     pinned_context: Mapped[dict[str, object]] = mapped_column(
@@ -638,7 +653,9 @@ class AssistantMessage(TimestampMixin, Base):
     session_id: Mapped[str] = mapped_column(
         ForeignKey("assistant_sessions.id", ondelete="CASCADE"), index=True
     )
-    created_by_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    created_by_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True, index=True
+    )
     role: Mapped[str] = mapped_column(String(16), index=True)
     message_text: Mapped[str] = mapped_column(Text)
     intent: Mapped[str | None] = mapped_column(String(64), nullable=True)

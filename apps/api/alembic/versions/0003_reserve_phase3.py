@@ -90,9 +90,7 @@ def upgrade() -> None:
     )
     op.add_column(
         "reserve_rows",
-        sa.Column(
-            "demand_basis_type", sa.String(length=64), nullable=False, server_default="none"
-        ),
+        sa.Column("demand_basis_type", sa.String(length=64), nullable=False, server_default="none"),
     )
     op.add_column(
         "reserve_rows",

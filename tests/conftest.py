@@ -26,6 +26,7 @@ def test_settings(tmp_path: Path) -> Settings:
         duckdb_path=str(tmp_path / "analytics.duckdb"),
         dev_admin_email="admin@magamax.local",
         dev_admin_password="magamax-admin",
+        jwt_secret="test-secret-not-for-production-1234567890",
         assistant_provider="deterministic",
         assistant_llm_enabled=False,
         assistant_openai_api_key=None,
@@ -64,7 +65,9 @@ def client(db_session: Session, test_settings: Settings) -> Generator[TestClient
 
 
 @pytest.fixture
-def anonymous_client(db_session: Session, test_settings: Settings) -> Generator[TestClient, None, None]:
+def anonymous_client(
+    db_session: Session, test_settings: Settings
+) -> Generator[TestClient, None, None]:
     app = create_app()
     app.router.on_startup.clear()
     app.router.on_shutdown.clear()

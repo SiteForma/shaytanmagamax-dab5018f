@@ -202,9 +202,19 @@ DIMENSION_CATALOG: dict[str, DimensionSpec] = {
     "client": DimensionSpec("client", "Клиент", "shared", "client_name", (("clients", "read"),)),
     "sku": DimensionSpec("sku", "SKU", "shared", "sku_name", (("catalog", "read"),)),
     "article": DimensionSpec("article", "Артикул", "shared", "sku_article", (("catalog", "read"),)),
-    "category": DimensionSpec("category", "Категория", "shared", "category_name", (("catalog", "read"),)),
-    "product_group": DimensionSpec("product_group", "Товарная группа", "management_report", "dimension_name", (("reports", "read"),)),
-    "warehouse": DimensionSpec("warehouse", "Склад", "stock", "warehouse_code", (("stock", "read"),)),
+    "category": DimensionSpec(
+        "category", "Категория", "shared", "category_name", (("catalog", "read"),)
+    ),
+    "product_group": DimensionSpec(
+        "product_group",
+        "Товарная группа",
+        "management_report",
+        "dimension_name",
+        (("reports", "read"),),
+    ),
+    "warehouse": DimensionSpec(
+        "warehouse", "Склад", "stock", "warehouse_code", (("stock", "read"),)
+    ),
     "month": DimensionSpec("month", "Месяц", "shared", "month"),
     "quarter": DimensionSpec("quarter", "Квартал", "shared", "quarter"),
     "year": DimensionSpec("year", "Год", "shared", "year"),
@@ -227,7 +237,9 @@ def metric_source(metrics: list[str]) -> AnalyticsSource | None:
     return next(iter(sources)) if len(sources) == 1 else None
 
 
-def capabilities_for_slice(metrics: list[str], dimensions: list[str]) -> tuple[tuple[str, str], ...]:
+def capabilities_for_slice(
+    metrics: list[str], dimensions: list[str]
+) -> tuple[tuple[str, str], ...]:
     capabilities: list[tuple[str, str]] = []
     for metric in metrics:
         spec = METRIC_CATALOG.get(metric)
@@ -257,6 +269,10 @@ def unsupported_dimensions_for_metrics(metrics: list[str], dimensions: list[str]
     if source is None:
         return []
     supported = set.intersection(
-        *(set(METRIC_CATALOG[metric].supported_dimensions) for metric in metrics if metric in METRIC_CATALOG)
+        *(
+            set(METRIC_CATALOG[metric].supported_dimensions)
+            for metric in metrics
+            if metric in METRIC_CATALOG
+        )
     )
     return [dimension for dimension in dimensions if dimension not in supported]

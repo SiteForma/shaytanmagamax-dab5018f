@@ -62,9 +62,7 @@ def _matches(policy: AccessPolicy, resource: str, action: str) -> bool:
 def _policies_for_roles(db: Session, role_codes: list[str]) -> list[AccessPolicy]:
     if not role_codes:
         return []
-    return db.scalars(
-        select(AccessPolicy).where(AccessPolicy.role_code.in_(role_codes))
-    ).all()
+    return db.scalars(select(AccessPolicy).where(AccessPolicy.role_code.in_(role_codes))).all()
 
 
 def user_has_capability(db: Session, user: User | None, resource: str, action: str) -> bool:

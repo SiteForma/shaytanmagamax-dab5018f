@@ -1,8 +1,14 @@
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, Depends
 
-from apps.api.app.api.dependencies import require_capability, require_user
+from apps.api.app.api.dependencies import (
+    require_authenticated_rate_limit,
+    require_capability,
+    require_user,
+)
 from apps.api.app.modules.admin.router import router as admin_router
 from apps.api.app.modules.assistant.router import router as assistant_router
 from apps.api.app.modules.auth.router import router as auth_router
@@ -23,8 +29,12 @@ from apps.api.app.modules.uploads.router import router as uploads_router
 api_router = APIRouter(prefix="/api")
 
 
-def _protected_dependencies(resource: str, action: str = "read") -> list[Depends]:
-    return [Depends(require_user), Depends(require_capability(resource, action))]
+def _protected_dependencies(resource: str, action: str = "read") -> list[Any]:
+    return [
+        Depends(require_user),
+        Depends(require_authenticated_rate_limit),
+        Depends(require_capability(resource, action)),
+    ]
 
 
 def _include_protected_router(router: APIRouter, *, resource: str, action: str = "read") -> None:
@@ -32,7 +42,10 @@ def _include_protected_router(router: APIRouter, *, resource: str, action: str =
 
 
 def _include_authenticated_router(router: APIRouter) -> None:
-    api_router.include_router(router, dependencies=[Depends(require_user)])
+    api_router.include_router(
+        router,
+        dependencies=[Depends(require_user), Depends(require_authenticated_rate_limit)],
+    )
 
 
 # Intentionally open for infra probes and sign-in bootstrap.

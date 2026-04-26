@@ -74,9 +74,7 @@ class S3ObjectStorage(ObjectStorage):
         try:
             import boto3  # type: ignore[import-not-found]
         except ImportError as exc:  # pragma: no cover - optional dependency path
-            raise RuntimeError(
-                "boto3 is required for s3 object storage mode"
-            ) from exc
+            raise RuntimeError("boto3 is required for s3 object storage mode") from exc
         self._client = boto3.client(
             "s3",
             endpoint_url=settings.s3_endpoint_url,

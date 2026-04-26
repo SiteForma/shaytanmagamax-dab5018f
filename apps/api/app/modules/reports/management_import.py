@@ -234,7 +234,9 @@ def _parse_year_profitability_sheet(
             dimension_type, label
         )
         if row_dimension_type == "department":
-            _upsert_department(db, report=report, sheet_name=sheet_name, row_index=row_index, label=label)
+            _upsert_department(
+                db, report=report, sheet_name=sheet_name, row_index=row_index, label=label
+            )
         source_row = row_objects[(sheet_name, row_index)]
         for column_index, metric_name, year, unit in metric_specs:
             if column_index >= len(values):
@@ -288,7 +290,9 @@ def _parse_own_production_sheet(
             label,
         )
         if dimension_type == "department":
-            _upsert_department(db, report=report, sheet_name=sheet_name, row_index=row_index, label=label)
+            _upsert_department(
+                db, report=report, sheet_name=sheet_name, row_index=row_index, label=label
+            )
 
         source_row = row_objects[(sheet_name, row_index)]
         specs = (
@@ -389,12 +393,16 @@ def _parse_pdz_sheet(
             continue
         dimension_type, dimension_code, dimension_name = _dimension_for_label("counterparty", label)
         if dimension_code is None:
-            department_type, department_code, department_name = _dimension_for_label("department", label)
+            department_type, department_code, department_name = _dimension_for_label(
+                "department", label
+            )
             if department_code is not None:
                 dimension_type = department_type
                 dimension_code = department_code
                 dimension_name = department_name
-                _upsert_department(db, report=report, sheet_name=sheet_name, row_index=row_index, label=label)
+                _upsert_department(
+                    db, report=report, sheet_name=sheet_name, row_index=row_index, label=label
+                )
         source_row = row_objects[(sheet_name, row_index)]
         for column_index, metric_name, year, unit in specs:
             if column_index >= len(values):
@@ -540,9 +548,7 @@ def import_management_report_workbook(
             delete(ManagementReportMetric).where(ManagementReportMetric.import_id == report.id)
         )
         db.execute(delete(ManagementReportRow).where(ManagementReportRow.import_id == report.id))
-        db.execute(
-            delete(OrganizationUnit).where(OrganizationUnit.source_import_id == report.id)
-        )
+        db.execute(delete(OrganizationUnit).where(OrganizationUnit.source_import_id == report.id))
         report.file_name = file_path.name
         report.source_path = str(file_path)
         report.report_year = report_year

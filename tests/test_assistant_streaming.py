@@ -68,7 +68,9 @@ def test_assistant_message_streams_deltas_and_persists_messages(client: TestClie
 
 
 def test_assistant_stream_emits_clarification_event(client: TestClient) -> None:
-    session_response = client.post("/api/assistant/sessions", json={"title": "Clarification stream"})
+    session_response = client.post(
+        "/api/assistant/sessions", json={"title": "Clarification stream"}
+    )
     assert session_response.status_code == 200
     session_id = session_response.json()["id"]
 

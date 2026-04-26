@@ -102,20 +102,40 @@ def _message_history_for_planning(messages: list[AssistantMessage]) -> list[dict
                 "text": message.message_text[:1200],
                 "intent": message.intent,
                 "status": message.status,
-                "title": response_payload.get("title") if isinstance(response_payload, dict) else None,
-                "summary": response_payload.get("summary") if isinstance(response_payload, dict) else None,
-                "type": response_payload.get("type") if isinstance(response_payload, dict) else None,
-                "pendingIntent": response_payload.get("pendingIntent") if isinstance(response_payload, dict) else None,
-                "missingFields": (response_payload.get("missingFields") or [])[:6]
-                if isinstance(response_payload, dict)
-                else [],
-                "contextUsed": response_payload.get("contextUsed") if isinstance(response_payload, dict) else None,
-                "sourceRefs": (response_payload.get("sourceRefs") or [])[:4]
-                if isinstance(response_payload, dict)
-                else [],
-                "toolCalls": (response_payload.get("toolCalls") or [])[:4]
-                if isinstance(response_payload, dict)
-                else [],
+                "title": (
+                    response_payload.get("title") if isinstance(response_payload, dict) else None
+                ),
+                "summary": (
+                    response_payload.get("summary") if isinstance(response_payload, dict) else None
+                ),
+                "type": (
+                    response_payload.get("type") if isinstance(response_payload, dict) else None
+                ),
+                "pendingIntent": (
+                    response_payload.get("pendingIntent")
+                    if isinstance(response_payload, dict)
+                    else None
+                ),
+                "missingFields": (
+                    (response_payload.get("missingFields") or [])[:6]
+                    if isinstance(response_payload, dict)
+                    else []
+                ),
+                "contextUsed": (
+                    response_payload.get("contextUsed")
+                    if isinstance(response_payload, dict)
+                    else None
+                ),
+                "sourceRefs": (
+                    (response_payload.get("sourceRefs") or [])[:4]
+                    if isinstance(response_payload, dict)
+                    else []
+                ),
+                "toolCalls": (
+                    (response_payload.get("toolCalls") or [])[:4]
+                    if isinstance(response_payload, dict)
+                    else []
+                ),
             }
         )
     return history
@@ -146,7 +166,9 @@ def create_assistant_session(
     return serialize_session(session, token_usage=summarize_session_token_usage(db, session.id))
 
 
-def list_assistant_sessions(db: Session, *, current_user: User | None) -> list[AssistantSessionSummary]:
+def list_assistant_sessions(
+    db: Session, *, current_user: User | None
+) -> list[AssistantSessionSummary]:
     return [
         serialize_session(session, token_usage=summarize_session_token_usage(db, session.id))
         for session in list_sessions(db, user_id=current_user.id if current_user else None)
@@ -162,7 +184,9 @@ def get_assistant_session_detail(
     session = get_session(db, session_id, user_id=current_user.id if current_user else None)
     messages = [
         serialize_message(message)
-        for message in list_messages(db, session.id, user_id=current_user.id if current_user else None)
+        for message in list_messages(
+            db, session.id, user_id=current_user.id if current_user else None
+        )
     ]
     return AssistantSessionDetail(
         **serialize_session(
@@ -209,7 +233,9 @@ def list_assistant_messages(
 ) -> list[AssistantMessageResponse]:
     return [
         serialize_message(message)
-        for message in list_messages(db, session_id, user_id=current_user.id if current_user else None)
+        for message in list_messages(
+            db, session_id, user_id=current_user.id if current_user else None
+        )
     ]
 
 
@@ -528,7 +554,9 @@ def get_context_options(db: Session, current_user: User | None) -> AssistantCont
     categories = []
     if full_internal or user_has_capability(db, current_user, "catalog", "read"):
         skus = [
-            AssistantContextOption(id=item.id, label=f"{item.article} · {item.name}", hint=item.category)
+            AssistantContextOption(
+                id=item.id, label=f"{item.article} · {item.name}", hint=item.category
+            )
             for item in list_skus(db)[:60]
         ]
         categories = [
@@ -546,7 +574,9 @@ def get_context_options(db: Session, current_user: User | None) -> AssistantCont
     reserve_runs = []
     if full_internal or user_has_capability(db, current_user, "reserve", "read"):
         reserve_runs = [
-            AssistantContextOption(id=item.id, label=f"{item.id} · {item.scope_type}", hint=item.created_at)
+            AssistantContextOption(
+                id=item.id, label=f"{item.id} · {item.scope_type}", hint=item.created_at
+            )
             for item in list_runs(db)[:20]
         ]
     return AssistantContextOptionsResponse(

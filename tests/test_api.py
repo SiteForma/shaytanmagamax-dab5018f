@@ -57,7 +57,9 @@ def test_protected_read_endpoints_require_authenticated_user(
 
 
 @pytest.mark.parametrize("path", ["/api/health/live", "/api/health/ready"])
-def test_intentionally_open_health_routes_remain_anonymous(anonymous_client: TestClient, path: str) -> None:
+def test_intentionally_open_health_routes_remain_anonymous(
+    anonymous_client: TestClient, path: str
+) -> None:
     response = anonymous_client.get(path)
     assert response.status_code in {200, 503}
     assert response.status_code != 401
@@ -156,7 +158,9 @@ def test_allowed_roles_can_access_read_surfaces(
     assert response.status_code == 200
 
 
-def test_reserve_calculate_persists_run_for_one_client_and_selected_skus(client: TestClient) -> None:
+def test_reserve_calculate_persists_run_for_one_client_and_selected_skus(
+    client: TestClient,
+) -> None:
     payload = {
         "client_ids": ["client_2"],
         "sku_ids": ["sku_1", "sku_3"],

@@ -111,7 +111,9 @@ def test_planner_sql_like_allowed_param_is_rejected(test_settings, monkeypatch) 
     assert plan.tool_names == []
 
 
-def test_planner_nonexistent_client_entity_is_rejected(client: TestClient, test_settings, monkeypatch) -> None:
+def test_planner_nonexistent_client_entity_is_rejected(
+    client: TestClient, test_settings, monkeypatch
+) -> None:
     _enable_llm(test_settings)
     _patch_llm_planner(
         monkeypatch,
@@ -162,7 +164,9 @@ def test_new_topic_does_not_inherit_previous_reserve_filters(client: TestClient)
     assert second.status_code == 200
     payload = second.json()["response"]
     assert payload["intent"] == "analytics_slice"
-    sales_tool = next(tool for tool in payload["toolCalls"] if tool["toolName"] == "get_analytics_slice")
+    sales_tool = next(
+        tool for tool in payload["toolCalls"] if tool["toolName"] == "get_analytics_slice"
+    )
     assert sales_tool["arguments"].get("client_id") is None
 
 

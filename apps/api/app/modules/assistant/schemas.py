@@ -174,7 +174,9 @@ class AssistantResponse(ORMModel):
     generated_at: str = Field(alias="generatedAt")
     trace_id: str = Field(alias="traceId")
     provider: str
-    token_usage: AssistantTokenUsage = Field(default_factory=AssistantTokenUsage, alias="tokenUsage")
+    token_usage: AssistantTokenUsage = Field(
+        default_factory=AssistantTokenUsage, alias="tokenUsage"
+    )
     context_used: AssistantPinnedContext = Field(alias="contextUsed")
     missing_fields: list[dict[str, Any]] = Field(default_factory=list, alias="missingFields")
     suggested_chips: list[str] = Field(default_factory=list, alias="suggestedChips")
@@ -210,7 +212,9 @@ class AssistantSessionSummary(ORMModel):
     preferred_mode: str = Field(alias="preferredMode")
     provider: str
     latest_trace_id: str | None = Field(default=None, alias="latestTraceId")
-    token_usage: AssistantTokenUsage = Field(default_factory=AssistantTokenUsage, alias="tokenUsage")
+    token_usage: AssistantTokenUsage = Field(
+        default_factory=AssistantTokenUsage, alias="tokenUsage"
+    )
     estimated_cost_rub: float = Field(default=0.0, alias="estimatedCostRub")
 
 

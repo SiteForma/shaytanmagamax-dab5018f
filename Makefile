@@ -2,7 +2,7 @@ PYTHON := ./.venv/bin/python
 PIP := ./.venv/bin/pip
 DRAMATIQ := ./.venv/bin/dramatiq
 
-.PHONY: venv install api web worker inbound-scheduler test lint migrate seed migrate-staging seed-staging api-staging worker-staging compose-up compose-down
+.PHONY: venv install lock install-locked api web worker inbound-scheduler test lint migrate seed migrate-staging seed-staging api-staging worker-staging compose-up compose-down
 
 venv:
 	python3 -m venv .venv
@@ -10,6 +10,12 @@ venv:
 install: venv
 	$(PIP) install -e ".[dev]"
 	npm --prefix apps/web install
+
+lock:
+	./.venv/bin/pip-compile pyproject.toml -o requirements.lock --strip-extras
+
+install-locked:
+	./.venv/bin/pip install -r requirements.lock
 
 api:
 	$(PYTHON) -m uvicorn apps.api.app.main:app --reload --host 127.0.0.1 --port 8000

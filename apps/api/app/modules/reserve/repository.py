@@ -37,7 +37,9 @@ def _filtered_clients(db: Session, request: ReserveCalculationInput) -> list[Cli
         .order_by(Client.name)
     )
     clients = db.scalars(stmt).unique().all()
-    diy_clients = [client for client in clients if client.network_type == "DIY" or client.client_group == "DIY"]
+    diy_clients = [
+        client for client in clients if client.network_type == "DIY" or client.client_group == "DIY"
+    ]
     if request.client_ids:
         allowed_ids = set(request.client_ids)
         diy_clients = [client for client in diy_clients if client.id in allowed_ids]
@@ -80,10 +82,15 @@ def _candidate_sku_ids(
     return monitored_ids
 
 
-def _filtered_skus(db: Session, request: ReserveCalculationInput, client_ids: list[str], as_of_date: date) -> list[Sku]:
+def _filtered_skus(
+    db: Session, request: ReserveCalculationInput, client_ids: list[str], as_of_date: date
+) -> list[Sku]:
     allowed_ids = _candidate_sku_ids(db, request, client_ids, as_of_date)
     skus = db.scalars(
-        select(Sku).options(selectinload(Sku.category)).where(Sku.active.is_(True)).order_by(Sku.article)
+        select(Sku)
+        .options(selectinload(Sku.category))
+        .where(Sku.active.is_(True))
+        .order_by(Sku.article)
     ).all()
     if allowed_ids:
         skus = [sku for sku in skus if sku.id in allowed_ids]
@@ -159,7 +166,8 @@ def load_reserve_dataset(db: Session, request: ReserveCalculationInput) -> Reser
     sku_ids = [sku.id for sku in skus]
     category_ids = [sku.category_id for sku in skus if sku.category_id]
     policies_by_client = {
-        client.id: next((policy for policy in client.policies if policy.active), None) for client in clients
+        client.id: next((policy for policy in client.policies if policy.active), None)
+        for client in clients
     }
     return ReserveDataset(
         clients=clients,

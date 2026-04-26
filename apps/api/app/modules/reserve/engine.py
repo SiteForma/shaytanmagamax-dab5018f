@@ -52,7 +52,9 @@ def _build_monthly_sales_index(
     dict[tuple[str, str], date],
 ]:
     client_sku: dict[tuple[str, str], dict[date, float]] = defaultdict(lambda: defaultdict(float))
-    client_category: dict[tuple[str, str], dict[date, float]] = defaultdict(lambda: defaultdict(float))
+    client_category: dict[tuple[str, str], dict[date, float]] = defaultdict(
+        lambda: defaultdict(float)
+    )
     global_sku: dict[str, dict[date, float]] = defaultdict(lambda: defaultdict(float))
     category_baseline: dict[str, dict[date, float]] = defaultdict(lambda: defaultdict(float))
     last_sale_dates: dict[tuple[str, str], date] = {}
@@ -113,7 +115,9 @@ def _metrics_from_months(
     )
 
 
-def _policy_override(source: dict[str, object], key_candidates: list[str]) -> dict[str, object] | None:
+def _policy_override(
+    source: dict[str, object], key_candidates: list[str]
+) -> dict[str, object] | None:
     for key in key_candidates:
         value = source.get(key)
         if isinstance(value, dict):
@@ -352,7 +356,9 @@ def _classify_status(
     return "warning", "Покрытие ниже целевого резерва"
 
 
-def _build_supply_pool(dataset: ReserveDataset, sku: Sku, request: ReserveCalculationInput) -> SupplyPool:
+def _build_supply_pool(
+    dataset: ReserveDataset, sku: Sku, request: ReserveCalculationInput
+) -> SupplyPool:
     stock = dataset.stock_by_sku.get(sku.id)
     inbound_rows = dataset.inbound_by_sku.get(sku.id, []) if request.include_inbound else []
     inbound_qty = _round(sum(row.quantity for row in inbound_rows))
@@ -362,7 +368,9 @@ def _build_supply_pool(dataset: ReserveDataset, sku: Sku, request: ReserveCalcul
         free_stock_qty=free_stock_qty,
         inbound_in_horizon_qty=inbound_qty,
         total_considered_available_qty=_round(free_stock_qty + inbound_qty),
-        inbound_statuses_counted=list(request.inbound_statuses_to_count if request.include_inbound else []),
+        inbound_statuses_counted=list(
+            request.inbound_statuses_to_count if request.include_inbound else []
+        ),
     )
 
 
@@ -444,7 +452,9 @@ def calculate_reserve_preview(
             target_reserve_qty = float(item["target_reserve_qty"])  # type: ignore[arg-type]
             allocated_free = min(remaining_free, target_reserve_qty)
             remaining_need = max(target_reserve_qty - allocated_free, 0.0)
-            allocated_inbound = min(remaining_inbound, remaining_need) if request.include_inbound else 0.0
+            allocated_inbound = (
+                min(remaining_inbound, remaining_need) if request.include_inbound else 0.0
+            )
             remaining_free = _round(remaining_free - allocated_free, config.quantity_precision)
             remaining_inbound = _round(
                 remaining_inbound - allocated_inbound, config.quantity_precision

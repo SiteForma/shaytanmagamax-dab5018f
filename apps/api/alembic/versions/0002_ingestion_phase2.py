@@ -66,9 +66,7 @@ def upgrade() -> None:
     )
     op.add_column(
         "upload_batches",
-        sa.Column(
-            "validation_payload", sa.JSON(), nullable=False, server_default=sa.text("'{}'")
-        ),
+        sa.Column("validation_payload", sa.JSON(), nullable=False, server_default=sa.text("'{}'")),
     )
     op.add_column(
         "upload_batches",

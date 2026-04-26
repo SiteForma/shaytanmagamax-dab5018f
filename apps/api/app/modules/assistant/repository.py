@@ -35,9 +35,9 @@ def create_session(
         title=(title or "Новая сессия").strip(),
         preferred_mode=preferred_mode,
         provider="deterministic",
-        pinned_context=(pinned_context or AssistantPinnedContext()).normalized().model_dump(
-            by_alias=True
-        ),
+        pinned_context=(pinned_context or AssistantPinnedContext())
+        .normalized()
+        .model_dump(by_alias=True),
     )
     db.add(session)
     db.commit()

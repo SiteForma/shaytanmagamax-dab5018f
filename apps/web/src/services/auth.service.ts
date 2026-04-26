@@ -40,6 +40,7 @@ export async function login(payload: LoginPayload): Promise<AuthSession> {
   );
   const session: AuthSession = {
     accessToken: response.access_token,
+    refreshToken: response.refresh_token,
     tokenType: response.token_type,
     userId: response.user_id,
     email: response.email,

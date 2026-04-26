@@ -25,7 +25,9 @@ def _create_assistant_only_user(db: Session) -> None:
         [
             role,
             user,
-            AccessPolicy(role_code="assistant_only", resource="assistant", action="query", effect="allow"),
+            AccessPolicy(
+                role_code="assistant_only", resource="assistant", action="query", effect="allow"
+            ),
         ]
     )
     db.flush()

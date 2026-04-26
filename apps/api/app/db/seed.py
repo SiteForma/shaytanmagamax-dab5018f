@@ -114,7 +114,16 @@ def seed_reference_data(db: Session, settings: Settings) -> None:
         ensure_policy("viewer", resource, "read")
     ensure_policy("viewer", "assistant", "query")
 
-    for resource in ("dashboard", "catalog", "clients", "stock", "inbound", "sales", "quality", "reports"):
+    for resource in (
+        "dashboard",
+        "catalog",
+        "clients",
+        "stock",
+        "inbound",
+        "sales",
+        "quality",
+        "reports",
+    ):
         ensure_policy("analyst", resource, "read")
     ensure_policy("analyst", "inbound", "sync")
     ensure_policy("analyst", "reserve", "read")
@@ -179,7 +188,9 @@ def seed_reference_data(db: Session, settings: Settings) -> None:
         Category(
             id="cat_handles", code="handles", name="Мебельные ручки", level=0, path="/handles"
         ),
-        Category(id="cat_slides", code="slides", name="Направляющие для ящиков", level=0, path="/slides"),
+        Category(
+            id="cat_slides", code="slides", name="Направляющие для ящиков", level=0, path="/slides"
+        ),
         Category(id="cat_hinges", code="hinges", name="Петли", level=0, path="/hinges"),
         Category(
             id="cat_lighting", code="lighting", name="Световая фурнитура", level=0, path="/lighting"

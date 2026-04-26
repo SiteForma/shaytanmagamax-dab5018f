@@ -47,8 +47,12 @@ def _run_matches_request(run: ReserveRun, request: ReserveCalculationInput) -> b
         run.scope_type == request.scope_type()
         and run.grouping_mode == request.grouping_mode
         and run.demand_strategy == request.effective_demand_strategy()
-        and run.reserve_months == (request.effective_reserve_months_override() or run.reserve_months)
-        and abs(run.safety_factor - (request.effective_safety_factor_override() or run.safety_factor)) < 0.0001
+        and run.reserve_months
+        == (request.effective_reserve_months_override() or run.reserve_months)
+        and abs(
+            run.safety_factor - (request.effective_safety_factor_override() or run.safety_factor)
+        )
+        < 0.0001
         and run.include_inbound == request.include_inbound
         and run.horizon_days == request.horizon_days
         and run.filters_payload == expected
@@ -110,7 +114,9 @@ def _serialize_row(row: ReserveRow) -> ReserveRowResponse:
         ),
         available_qty=row.available_qty,
         shortage_qty=row.shortage_qty,
-        coverage_months=row.coverage_months if row.coverage_months > 0 else payload.get("coverage_months"),
+        coverage_months=(
+            row.coverage_months if row.coverage_months > 0 else payload.get("coverage_months")
+        ),
         status=row.status,
         status_reason=row.status_reason or str(payload.get("status_reason", "")),
         demand_basis=row.demand_basis,
@@ -121,7 +127,9 @@ def _serialize_row(row: ReserveRow) -> ReserveRowResponse:
     )
 
 
-def _serialize_computation_row(row: ReserveComputationRow, request: ReserveCalculationInput) -> ReserveRowResponse:
+def _serialize_computation_row(
+    row: ReserveComputationRow, request: ReserveCalculationInput
+) -> ReserveRowResponse:
     return ReserveRowResponse(
         client_id=row.client_id,
         client_name=row.client_name,
@@ -324,7 +332,9 @@ def get_run_detail(db: Session, run_id: str) -> ReserveRunSummaryResponse | None
         return None
     rows = get_run_rows(db, run_id)
     totals, status_counts = summarize_reserve_rows(rows)
-    return ReserveRunSummaryResponse(run=_serialize_run(run), totals=totals, status_counts=status_counts)
+    return ReserveRunSummaryResponse(
+        run=_serialize_run(run), totals=totals, status_counts=status_counts
+    )
 
 
 def get_run_rows(db: Session, run_id: str) -> list[ReserveRowResponse]:

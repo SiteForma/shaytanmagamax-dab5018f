@@ -49,7 +49,9 @@ def test_sync_inbound_google_sheet_replaces_authoritative_sheet_rows(
     assert result.total_client_order_qty == 2054
 
     deliveries = db_session.scalars(
-        select(InboundDelivery).where(InboundDelivery.external_ref.like(f"{GOOGLE_SHEET_SOURCE_PREFIX}:%"))
+        select(InboundDelivery).where(
+            InboundDelivery.external_ref.like(f"{GOOGLE_SHEET_SOURCE_PREFIX}:%")
+        )
     ).all()
     assert len(deliveries) == 2
     first = next(row for row in deliveries if row.container_ref == "Z25-054")

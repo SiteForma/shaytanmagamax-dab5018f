@@ -34,7 +34,25 @@ def test_assistant_routing_uses_free_chat_for_domain_usage_messages(db_session: 
     assert not route.warnings
 
 
-def test_assistant_query_returns_domain_chat_response_without_tool_calls(client: TestClient) -> None:
+def test_assistant_routing_uses_free_chat_for_short_help_request(db_session: Session) -> None:
+    route = route_question(db_session, "помоги")
+
+    assert route.intent == "free_chat"
+    assert not route.warnings
+
+
+def test_assistant_routing_uses_management_report_for_broad_year_close_question(
+    db_session: Session,
+) -> None:
+    route = route_question(db_session, "как в целом 2025 год закрыли?")
+
+    assert route.intent == "management_report_summary"
+    assert not route.warnings
+
+
+def test_assistant_query_returns_domain_chat_response_without_tool_calls(
+    client: TestClient,
+) -> None:
     response = client.post(
         "/api/assistant/query",
         json={"text": "Привет, как лучше задавать тебе вопросы?"},
@@ -45,6 +63,8 @@ def test_assistant_query_returns_domain_chat_response_without_tool_calls(client:
     assert payload["status"] == "completed"
     assert payload["toolCalls"] == []
     assert payload["sections"]
+    assert "внутренний аналитик MAGAMAX" in payload["summary"]
+    assert "Я могу помочь только" not in payload["summary"]
     assert not any(warning["code"] == "unsupported_intent" for warning in payload["warnings"])
 
 
@@ -59,7 +79,7 @@ def test_assistant_rejects_out_of_scope_questions(client: TestClient) -> None:
     assert payload["status"] == "unsupported"
     assert payload["provider"] == "deterministic"
     assert payload["toolCalls"] == []
-    assert "Я могу помочь только с работой MAGAMAX" in payload["summary"]
+    assert "Это вне моей рабочей зоны" in payload["summary"]
     assert any(warning["code"] == "out_of_scope_or_ambiguous" for warning in payload["warnings"])
 
 
@@ -188,10 +208,7 @@ def test_assistant_query_handles_upload_and_quality_awareness(client: TestClient
     assert response.status_code == 200
     payload = response.json()
     assert payload["intent"] in {"upload_status_summary", "quality_issue_summary"}
-    assert any(
-        item["sourceType"] in {"upload_batch", "quality"}
-        for item in payload["sourceRefs"]
-    )
+    assert any(item["sourceType"] in {"upload_batch", "quality"} for item in payload["sourceRefs"])
 
 
 def test_assistant_provider_disabled_falls_back_to_deterministic(
@@ -243,7 +260,7 @@ def test_assistant_provider_can_polish_response_when_enabled(
                             )
                         }
                     }
-                ]
+                ],
             }
 
     class FakeHttpClient:

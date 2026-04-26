@@ -24,7 +24,9 @@ def build_context_bundle(
     warnings = list(route.warnings)
 
     selected_client_id = route.extracted_client_id or normalized.selected_client_id
-    selected_sku_id = (route.extracted_sku_ids[0] if route.extracted_sku_ids else None) or normalized.selected_sku_id
+    selected_sku_id = (
+        route.extracted_sku_ids[0] if route.extracted_sku_ids else None
+    ) or normalized.selected_sku_id
     selected_category_id = route.extracted_category_id or normalized.selected_category_id
     selected_upload_ids = route.extracted_upload_ids or list(normalized.selected_upload_ids)
     selected_reserve_run_id = normalized.selected_reserve_run_id

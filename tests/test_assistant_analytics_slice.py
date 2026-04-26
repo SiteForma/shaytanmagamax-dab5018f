@@ -130,7 +130,9 @@ def test_assistant_sales_followups_use_analytics_slice(client) -> None:
     assert categories["toolCalls"][0]["arguments"]["dimensions"] == ["category"]
 
 
-def test_show_reserve_does_not_create_run_and_recalculate_requires_action(client, db_session: Session) -> None:
+def test_show_reserve_does_not_create_run_and_recalculate_requires_action(
+    client, db_session: Session
+) -> None:
     before = db_session.scalar(select(func.count()).select_from(ReserveRun))
 
     show = client.post("/api/assistant/query", json={"text": "Покажи резерв по OBI"})

@@ -15,7 +15,9 @@ from apps.api.app.modules.mapping.service import (
 
 SKU_CODE_PATTERN = re.compile(r"\b[0-9A-Za-zА-Яа-я]+(?:-[0-9A-Za-zА-Яа-я]+)+\b")
 MONTHS_PATTERN = re.compile(r"(\d+)\s*(?:месяц|месяца|месяцев|months?)", re.IGNORECASE)
-SAFETY_PATTERN = re.compile(r"(?:safety|коэффициент|factor|запас)\s*[:=]?\s*(\d+(?:[.,]\d+)?)", re.IGNORECASE)
+SAFETY_PATTERN = re.compile(
+    r"(?:safety|коэффициент|factor|запас)\s*[:=]?\s*(\d+(?:[.,]\d+)?)", re.IGNORECASE
+)
 PRODUCT_GROUP_ABBR_PATTERN = re.compile(r"(?<![0-9a-zа-я])тг(?![0-9a-zа-я])", re.IGNORECASE)
 
 DOMAIN_CHAT_TOKENS = (
@@ -89,9 +91,92 @@ CONSOLE_USAGE_PHRASES = (
     "как лучше задавать",
     "какие вопросы",
     "помоги сформулировать",
+    "помоги",
+    "помощь",
+    "help",
     "пример вопроса",
     "как пользоваться",
     "что можно спросить",
+    "с чего начать",
+    "что спросить",
+    "что ты можешь",
+    "что умеешь",
+    "покажи примеры",
+    "дай примеры",
+)
+
+MONTH_BUSINESS_TOKENS = (
+    "январ",
+    "феврал",
+    "март",
+    "апрел",
+    "май",
+    "мая",
+    "июн",
+    "июл",
+    "август",
+    "сентябр",
+    "октябр",
+    "ноябр",
+    "декабр",
+)
+
+YEAR_RESULT_PHRASES = (
+    "как закрыли",
+    "закрыли год",
+    "год закрыли",
+    "итоги года",
+    "итоги 2024",
+    "итоги 2025",
+    "что по году",
+    "что по 2024",
+    "что по 2025",
+    "как отработали год",
+    "как в целом",
+    "результаты года",
+    "2024 год",
+    "2025 год",
+)
+
+BROAD_BUSINESS_PHRASES = (
+    "как дела",
+    "что происходит",
+    "что с",
+    "где просели",
+    "где выросли",
+    "что просело",
+    "что выросло",
+    "что проблемное",
+    "покажи проблемные",
+    "что надо заказать",
+    "что заказать",
+    "кого заказать",
+    "что в зоне риска",
+    "зоне риска",
+    "что хуже всего",
+    "что лучше всего",
+    "антитоп",
+    "динамика",
+    "сравни",
+    "по клиентам",
+    "по категориям",
+    "по sku",
+    "по артикулам",
+)
+
+EXTERNAL_TOPIC_TOKENS = (
+    "погода",
+    "политик",
+    "новост",
+    "рецепт",
+    "анекдот",
+    "евгения онегина",
+    "онегин",
+    "пушкин",
+    "фильм",
+    "сериал",
+    "спорт",
+    "гороскоп",
 )
 
 
@@ -105,7 +190,37 @@ def _is_domain_chat(question: str) -> bool:
     )
 
 
+def _is_help_question(question: str) -> bool:
+    return any(phrase in question for phrase in CONSOLE_USAGE_PHRASES)
+
+
+def _is_external_question(question: str) -> bool:
+    return any(token in question for token in EXTERNAL_TOPIC_TOKENS)
+
+
 def _is_management_report_question(question: str) -> bool:
+    if any(year in question for year in ("2024", "2025")) and any(
+        token in question
+        for token in (
+            "закрыли",
+            "закрыл",
+            "закрыт",
+            "закрыли год",
+            "итог",
+            "итоги",
+            "результат",
+            "результаты",
+            "в целом",
+            "общем",
+            "общий",
+            "общая",
+            "год закры",
+            "год закон",
+            "закончили",
+        )
+    ):
+        return True
+
     if any(
         token in question
         for token in (
@@ -127,9 +242,11 @@ def _is_management_report_question(question: str) -> bool:
     ):
         return True
 
-    if any(year in question for year in ("2024", "2025")) and any(
-        token in question for token in ("товар", "продукт", "номенклатур")
-    ) and any(token in question for token in ("заработ", "прибыл", "маржин", "выруч")):
+    if (
+        any(year in question for year in ("2024", "2025"))
+        and any(token in question for token in ("товар", "продукт", "номенклатур"))
+        and any(token in question for token in ("заработ", "прибыл", "маржин", "выруч"))
+    ):
         return True
 
     # In MAGAMAX reports, "ТГ" is the common shorthand for "товарная группа".
@@ -149,6 +266,70 @@ def _is_management_report_question(question: str) -> bool:
             "лучше",
             "хуже",
         )
+    )
+
+
+def _is_year_result_question(question: str) -> bool:
+    has_year = any(year in question for year in ("2024", "2025"))
+    has_phrase = any(phrase in question for phrase in YEAR_RESULT_PHRASES)
+    has_result_token = any(
+        token in question
+        for token in (
+            "закры",
+            "итог",
+            "результат",
+            "в целом",
+            "что по",
+            "как отработали год",
+        )
+    )
+    return has_phrase or (has_year and has_result_token)
+
+
+def _is_month_performance_question(question: str) -> bool:
+    has_month = any(token in question for token in MONTH_BUSINESS_TOKENS)
+    has_business_phrase = any(
+        phrase in question
+        for phrase in (
+            "как отработали",
+            "что с",
+            "что по",
+            "просел",
+            "просели",
+            "вырос",
+            "выросли",
+            "динамика",
+            "хуже",
+            "лучше",
+        )
+    )
+    return has_month and has_business_phrase
+
+
+def _is_problem_or_order_question(question: str) -> bool:
+    return any(
+        phrase in question
+        for phrase in (
+            "покажи проблемные",
+            "что проблемное",
+            "что надо заказать",
+            "что заказать",
+            "что в зоне риска",
+            "где не хватает",
+            "не хватает",
+            "дефицит",
+            "низкий остаток",
+        )
+    )
+
+
+def _is_broad_business_question(question: str) -> bool:
+    if _is_external_question(question):
+        return False
+    return (
+        any(phrase in question for phrase in BROAD_BUSINESS_PHRASES)
+        or _is_year_result_question(question)
+        or _is_month_performance_question(question)
     )
 
 
@@ -205,17 +386,31 @@ def _detect_intent(question: str) -> str:
     q = _flatten_text(question)
     if not q:
         return "unsupported_or_ambiguous"
+    if _is_help_question(q):
+        return "free_chat"
     if _is_data_overview_question(q):
         return "data_overview"
-    if any(token in q for token in ("рассчитай", "пересчитай", "перерассчитай", "calculate")) and any(
-        token in q for token in ("резерв", "reserve")
+    if any(token in q for token in ("постав", "inbound", "incoming", "eta")) and any(
+        token in q for token in ("дефицит", "закро", "закры", "влия")
     ):
+        return "inbound_impact"
+    if _is_problem_or_order_question(q):
+        return "stock_risk_summary"
+    if any(
+        token in q for token in ("рассчитай", "пересчитай", "перерассчитай", "calculate")
+    ) and any(token in q for token in ("резерв", "reserve")):
         return "reserve_calculation"
+    if _is_year_result_question(q):
+        return "management_report_summary"
     if _is_management_report_question(q):
         return "management_report_summary"
+    if _is_month_performance_question(q):
+        return "analytics_slice"
+    if any(phrase in q for phrase in ("как дела по ", "что по клиент", "как дела с ")):
+        return "client_summary"
     if "дефицит" in q and any(token in q for token in ("товар", "sku", "артикул")):
         return "analytics_slice"
-    if "топ sku" in q or "топ артик" in q:
+    if "топ sku" in q or "топ артик" in q or "топ" in q or "антитоп" in q:
         return "analytics_slice"
     if _is_analytics_slice_question(q):
         return "analytics_slice"
@@ -245,13 +440,31 @@ def _detect_intent(question: str) -> str:
         token in q for token in ("позици", "sku", "товар")
     ):
         return "stock_risk_summary"
-    if any(token in q for token in ("склад", "stock risk", "stockout", "coverage", "покрытие", "зоне риска", "зона риска")):
+    if any(
+        token in q
+        for token in (
+            "склад",
+            "stock risk",
+            "stockout",
+            "coverage",
+            "покрытие",
+            "зоне риска",
+            "зона риска",
+        )
+    ):
         return "stock_risk_summary"
     if any(token in q for token in ("качество", "quality", "issue", "проблемы данных")):
         return "quality_issue_summary"
     if any(
         token in q
-        for token in ("загруз", "upload", "freshness", "обновлял", "данные использовались", "data used")
+        for token in (
+            "загруз",
+            "upload",
+            "freshness",
+            "обновлял",
+            "данные использовались",
+            "data used",
+        )
     ):
         return "upload_status_summary"
     if "sku" in q or "артикул" in q:
@@ -260,6 +473,8 @@ def _detect_intent(question: str) -> str:
         return "client_summary"
     if any(token in q for token in ("резерв", "reserve")):
         return "reserve_calculation"
+    if _is_broad_business_question(q):
+        return "analytics_slice"
     if _is_domain_chat(q):
         return "free_chat"
     return "unsupported_or_ambiguous"
@@ -358,7 +573,10 @@ def route_question(
                 message="В вопросе не найден явный SKU, будет использован pinned context если он задан.",
             )
         )
-    if route.intent in {"client_summary", "reserve_calculation", "diy_coverage_check"} and not route.extracted_client_id:
+    if (
+        route.intent in {"client_summary", "reserve_calculation", "diy_coverage_check"}
+        and not route.extracted_client_id
+    ):
         route.warnings.append(
             AssistantWarningData(
                 code="missing_client_reference",

@@ -46,10 +46,15 @@ def upgrade() -> None:
         sa.Column("message_count", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
-        sa.ForeignKeyConstraint(["created_by_id"], ["users.id"], ),
+        sa.ForeignKeyConstraint(
+            ["created_by_id"],
+            ["users.id"],
+        ),
         sa.PrimaryKeyConstraint("id"),
     )
-    op.create_index(op.f("ix_assistant_sessions_created_by_id"), "assistant_sessions", ["created_by_id"])
+    op.create_index(
+        op.f("ix_assistant_sessions_created_by_id"), "assistant_sessions", ["created_by_id"]
+    )
     op.create_index(op.f("ix_assistant_sessions_status"), "assistant_sessions", ["status"])
 
     op.create_table(
@@ -72,11 +77,16 @@ def upgrade() -> None:
         sa.Column("generated_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
-        sa.ForeignKeyConstraint(["created_by_id"], ["users.id"], ),
+        sa.ForeignKeyConstraint(
+            ["created_by_id"],
+            ["users.id"],
+        ),
         sa.ForeignKeyConstraint(["session_id"], ["assistant_sessions.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
     )
-    op.create_index(op.f("ix_assistant_messages_created_by_id"), "assistant_messages", ["created_by_id"])
+    op.create_index(
+        op.f("ix_assistant_messages_created_by_id"), "assistant_messages", ["created_by_id"]
+    )
     op.create_index(op.f("ix_assistant_messages_role"), "assistant_messages", ["role"])
     op.create_index(op.f("ix_assistant_messages_session_id"), "assistant_messages", ["session_id"])
     op.create_index(op.f("ix_assistant_messages_trace_id"), "assistant_messages", ["trace_id"])

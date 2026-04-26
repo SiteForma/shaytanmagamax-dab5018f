@@ -102,7 +102,9 @@ def test_upload_actions_emit_audit_events(client: TestClient) -> None:
         params={"targetType": "upload_file"},
     )
     assert audit_response.status_code == 200
-    actions = {item["action"] for item in audit_response.json()["items"] if item["target_id"] == file_id}
+    actions = {
+        item["action"] for item in audit_response.json()["items"] if item["target_id"] == file_id
+    }
     assert "uploads.file_uploaded" in actions
     assert "uploads.validated" in actions
 
@@ -168,7 +170,10 @@ def test_production_settings_disable_implicit_startup_mutations() -> None:
     assert settings.should_auto_create_schema is False
     assert settings.should_seed_sample_data is False
     assert settings.should_materialize_analytics_on_startup is False
-    assert "STARTUP_SCHEMA_MODE must be migrations_only in production" in settings.production_startup_errors()
+    assert (
+        "STARTUP_SCHEMA_MODE must be migrations_only in production"
+        in settings.production_startup_errors()
+    )
 
 
 def test_production_settings_block_unsafe_defaults() -> None:
@@ -192,8 +197,8 @@ def test_production_settings_accept_staging_like_posture() -> None:
         object_storage_mode="s3",
         s3_endpoint_url="http://localhost:9000",
         s3_bucket="shaytan-machine",
-        s3_access_key="minioadmin",
-        s3_secret_key="minioadmin",
+        s3_access_key="staging-access-key",
+        s3_secret_key="staging-secret-key",
         jwt_secret="x" * 40,
         sentry_dsn="https://public@example.com/1",
         otel_enabled=True,
@@ -237,7 +242,9 @@ def test_seed_reference_data_respects_foreign_keys_with_strict_sqlite(tmp_path: 
 
 
 def test_admin_health_details_and_ready_endpoint_include_ops_posture(client: TestClient) -> None:
-    health_response = client.get("/api/admin/system/health-details", headers={"X-Dev-User": "user_admin"})
+    health_response = client.get(
+        "/api/admin/system/health-details", headers={"X-Dev-User": "user_admin"}
+    )
     assert health_response.status_code == 200
     health = health_response.json()
     assert "workerQueues" in health

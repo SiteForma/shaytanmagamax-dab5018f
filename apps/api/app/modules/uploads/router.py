@@ -96,9 +96,7 @@ def get_upload_file_detail_route(
 
 
 @router.get("/files/{file_id}/preview", response_model=UploadPreviewResponse)
-def get_upload_preview_route(
-    file_id: str, db: Session = Depends(get_db)
-) -> UploadPreviewResponse:
+def get_upload_preview_route(file_id: str, db: Session = Depends(get_db)) -> UploadPreviewResponse:
     return get_upload_preview(db, file_id)
 
 
@@ -124,9 +122,7 @@ def suggest_upload_mapping_route(
 
 
 @router.get("/files/{file_id}/mapping", response_model=MappingStateResponse)
-def get_upload_mapping_route(
-    file_id: str, db: Session = Depends(get_db)
-) -> MappingStateResponse:
+def get_upload_mapping_route(file_id: str, db: Session = Depends(get_db)) -> MappingStateResponse:
     return get_upload_mapping_state(db, file_id)
 
 
@@ -183,7 +179,10 @@ def save_upload_mapping_route(
         action="uploads.mapping_saved",
         target_type="upload_file",
         target_id=file_id,
-        context={"template_id": payload.template_id, "mapped_fields": sorted(payload.mappings.keys())},
+        context={
+            "template_id": payload.template_id,
+            "mapped_fields": sorted(payload.mappings.keys()),
+        },
     )
     db.commit()
     return detail
@@ -203,7 +202,10 @@ def validate_upload_route(
         action="uploads.validated",
         target_type="upload_file",
         target_id=file_id,
-        context={"status": detail.file.status, "issues": detail.validation.issue_counts.model_dump(mode="json")},
+        context={
+            "status": detail.file.status,
+            "issues": detail.validation.issue_counts.model_dump(mode="json"),
+        },
     )
     db.commit()
     return detail

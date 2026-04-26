@@ -68,12 +68,7 @@ def _parse_quantity(value: object) -> float:
     text = _clean_text(value)
     if not text:
         return 0.0
-    normalized = (
-        text.replace("\u2212", "-")
-        .replace(" ", "")
-        .replace("\xa0", "")
-        .replace(",", ".")
-    )
+    normalized = text.replace("\u2212", "-").replace(" ", "").replace("\xa0", "").replace(",", ".")
     try:
         return float(normalized)
     except ValueError as exc:
@@ -273,16 +268,21 @@ def sync_inbound_google_sheet(
     source_url: str | None = None,
 ) -> InboundSyncResponse:
     csv_payload, resolved_source_url = (
-        (csv_text, source_url or "inline://test") if csv_text is not None else _download_sheet_csv(settings)
+        (csv_text, source_url or "inline://test")
+        if csv_text is not None
+        else _download_sheet_csv(settings)
     )
     rows, warnings = parse_inbound_sheet_csv(csv_payload)
     synced_at = utc_now()
 
-    existing_count = db.scalar(
-        select(func.count(InboundDelivery.id)).where(
-            InboundDelivery.external_ref.like(f"{GOOGLE_SHEET_SOURCE_PREFIX}:%")
+    existing_count = (
+        db.scalar(
+            select(func.count(InboundDelivery.id)).where(
+                InboundDelivery.external_ref.like(f"{GOOGLE_SHEET_SOURCE_PREFIX}:%")
+            )
         )
-    ) or 0
+        or 0
+    )
     db.execute(
         delete(InboundDelivery).where(
             InboundDelivery.external_ref.like(f"{GOOGLE_SHEET_SOURCE_PREFIX}:%")

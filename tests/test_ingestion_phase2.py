@@ -33,12 +33,18 @@ def _upload_file(
 
 def test_read_upload_frame_supports_messy_csv_and_xlsx(tmp_path: Path) -> None:
     csv_result = read_upload_frame(Path("data/fixtures/uploads/sales_messy.csv"))
-    assert list(csv_result.frame.columns) == ["Артикул", "Контрагент", "Кол-во", "Период", "Выручка"]
+    assert list(csv_result.frame.columns) == [
+        "Артикул",
+        "Контрагент",
+        "Кол-во",
+        "Период",
+        "Выручка",
+    ]
 
     xlsx_path = tmp_path / "sales.xlsx"
-    pd.DataFrame([{"Артикул": "K-2650-CR", "Сеть": "Leman Pro", "Кол-во": 420, "Дата": "2026-04-01"}]).to_excel(
-        xlsx_path, index=False
-    )
+    pd.DataFrame(
+        [{"Артикул": "K-2650-CR", "Сеть": "Leman Pro", "Кол-во": 420, "Дата": "2026-04-01"}]
+    ).to_excel(xlsx_path, index=False)
     xlsx_result = read_upload_frame(xlsx_path)
     assert xlsx_result.parser == "xlsx"
     assert list(xlsx_result.frame.columns) == ["Артикул", "Сеть", "Кол-во", "Дата"]
@@ -53,10 +59,8 @@ def test_read_upload_payload_supports_csv_bytes() -> None:
 
 def test_read_upload_payload_supports_single_column_csv() -> None:
     payload = (
-        "Подразделение\n"
-        "0311 ОТДЕЛ ПРОДАЖ КОМПЛЕКТУЮЩИЕ МОСКВА\n"
-        "0336 ОТДЕЛ СЕТЕВЫХ ПРОДАЖ\n"
-    ).encode("utf-8")
+        "Подразделение\n" "0311 ОТДЕЛ ПРОДАЖ КОМПЛЕКТУЮЩИЕ МОСКВА\n" "0336 ОТДЕЛ СЕТЕВЫХ ПРОДАЖ\n"
+    ).encode()
 
     result = read_upload_payload(payload, "departments.csv")
 
@@ -149,7 +153,9 @@ def test_duplicate_upload_warning_path(client: TestClient) -> None:
 
 
 def test_partial_success_path_and_issues_listing(client: TestClient) -> None:
-    payload = _upload_file(client, Path("data/fixtures/uploads/diy_clients_invalid.csv"), "diy_clients")
+    payload = _upload_file(
+        client, Path("data/fixtures/uploads/diy_clients_invalid.csv"), "diy_clients"
+    )
     file_id = payload["file"]["id"]
     assert payload["file"]["status"] == "issues_found"
 
@@ -261,7 +267,9 @@ def test_s3_backed_upload_flow_reads_preview_and_validates_via_object_storage(
             return {"Body": BytesIO(self._objects[(Bucket, Key)])}
 
     fake_s3 = FakeS3Client()
-    monkeypatch.setitem(sys.modules, "boto3", types.SimpleNamespace(client=lambda *args, **kwargs: fake_s3))
+    monkeypatch.setitem(
+        sys.modules, "boto3", types.SimpleNamespace(client=lambda *args, **kwargs: fake_s3)
+    )
     test_settings.object_storage_mode = "s3"
     test_settings.s3_bucket = "shaytan-machine-tests"
     test_settings.s3_access_key = "minioadmin"
@@ -308,8 +316,10 @@ def test_raw_report_uses_review_only_lifecycle(client: TestClient) -> None:
 
 
 def test_upload_list_and_issue_endpoints_return_real_pagination_meta(client: TestClient) -> None:
-    first = _upload_file(client, Path("data/fixtures/uploads/sales_valid.csv"), "sales")
-    second = _upload_file(client, Path("data/fixtures/uploads/diy_clients_invalid.csv"), "diy_clients")
+    _upload_file(client, Path("data/fixtures/uploads/sales_valid.csv"), "sales")
+    second = _upload_file(
+        client, Path("data/fixtures/uploads/diy_clients_invalid.csv"), "diy_clients"
+    )
 
     files_page = client.get("/api/uploads/files", params={"page": 1, "page_size": 1})
     assert files_page.status_code == 200

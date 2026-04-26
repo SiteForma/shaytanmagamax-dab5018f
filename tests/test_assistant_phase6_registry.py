@@ -26,7 +26,10 @@ def test_registry_rejects_unknown_tool_and_unknown_params() -> None:
     assert unknown_tool.value.code == "assistant_unknown_tool"
 
     with pytest.raises(DomainError) as unknown_param:
-        registry.validate("get_sales_summary", {"date_from": "2025-01-01", "date_to": "2025-12-01", "sql": "select 1"})
+        registry.validate(
+            "get_sales_summary",
+            {"date_from": "2025-01-01", "date_to": "2025-12-01", "sql": "select 1"},
+        )
     assert unknown_param.value.code == "assistant_unknown_tool_param"
 
 

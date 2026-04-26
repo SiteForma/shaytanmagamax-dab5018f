@@ -86,7 +86,9 @@ class AssistantToolSpec:
 
     def validate(self, params: dict[str, Any]) -> list[AssistantMissingField]:
         unknown = sorted(
-            set(params) - self.allowed_fields - {"_followup_intent", "_pending_intent", "_force_tool"}
+            set(params)
+            - self.allowed_fields
+            - {"_followup_intent", "_pending_intent", "_force_tool"}
         )
         if unknown:
             raise DomainError(
@@ -126,9 +128,13 @@ class AssistantToolSpec:
                 metrics = [normalize_metric_name(str(item)) for item in raw_metrics]
             else:
                 metrics = []
-            sources = {METRIC_CATALOG[metric].source for metric in metrics if metric in METRIC_CATALOG}
+            sources = {
+                METRIC_CATALOG[metric].source for metric in metrics if metric in METRIC_CATALOG
+            }
             needs_period = bool(sources.intersection({"sales", "inbound", "management_report"}))
-            has_period = bool(params.get("period")) or bool(params.get("date_from") and params.get("date_to"))
+            has_period = bool(params.get("period")) or bool(
+                params.get("date_from") and params.get("date_to")
+            )
             if needs_period and not has_period and all(item.name != "period" for item in missing):
                 missing.append(_missing_field("period", self.intent, params))
         return missing
@@ -250,7 +256,9 @@ def _apply_params(bundle: AssistantContextBundle, params: dict[str, Any]) -> Ass
     if params.get("sku_id"):
         bundle.context.selected_sku_id = str(params["sku_id"])
     if params.get("sku_ids"):
-        bundle.route.extracted_sku_ids = [str(item) for item in params["sku_ids"] if str(item).strip()]
+        bundle.route.extracted_sku_ids = [
+            str(item) for item in params["sku_ids"] if str(item).strip()
+        ]
     if params.get("category_id"):
         bundle.context.selected_category_id = str(params["category_id"])
     if params.get("reserve_run_id"):
@@ -483,7 +491,15 @@ def get_default_tool_registry() -> AssistantToolRegistry:
             intent="stock_risk_summary",
             description="Список SKU с низким покрытием склада.",
             required_fields=(),
-            optional_fields=("category_id", "sku_id", "client_id", "status", "risk", "filters", "reserve_months"),
+            optional_fields=(
+                "category_id",
+                "sku_id",
+                "client_id",
+                "status",
+                "risk",
+                "filters",
+                "reserve_months",
+            ),
             required_capabilities=(("stock", "read"),),
             handler=_stock_handler,
         )
@@ -571,7 +587,15 @@ def get_default_tool_registry() -> AssistantToolRegistry:
             intent="sales_summary",
             description="Сводка продаж по периоду, клиенту и SKU.",
             required_fields=("date_from", "date_to"),
-            optional_fields=("date_from", "date_to", "client_id", "client_name", "sku_id", "sku_ids", "metric"),
+            optional_fields=(
+                "date_from",
+                "date_to",
+                "client_id",
+                "client_name",
+                "sku_id",
+                "sku_ids",
+                "metric",
+            ),
             required_capabilities=(("sales", "read"),),
             handler=_sales_summary_handler,
         )

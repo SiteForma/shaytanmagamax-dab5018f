@@ -155,7 +155,9 @@ def test_period_comparison_followup_after_sales_keeps_domain_state(client: TestC
     payload = second.json()["response"]
     assert payload["intent"] == "period_comparison"
     assert payload["type"] == "answer"
-    tool = next(tool for tool in payload["toolCalls"] if tool["toolName"] == "get_period_comparison")
+    tool = next(
+        tool for tool in payload["toolCalls"] if tool["toolName"] == "get_period_comparison"
+    )
     assert tool["arguments"]["current_period"] == "2025-03"
     assert tool["arguments"]["previous_period"] == "2025-02"
 

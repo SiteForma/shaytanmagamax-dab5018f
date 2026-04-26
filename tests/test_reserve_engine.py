@@ -4,14 +4,27 @@ from datetime import date
 
 from sqlalchemy.orm import Session
 
-from apps.api.app.db.models import Category, Client, DiyPolicy, Product, ReserveRow, ReserveRun, SalesFact, Sku
+from apps.api.app.db.models import (
+    Category,
+    Client,
+    DiyPolicy,
+    Product,
+    ReserveRow,
+    ReserveRun,
+    SalesFact,
+    Sku,
+)
 from apps.api.app.modules.reserve.domain import (
     DemandMetrics,
     EffectivePolicy,
     ReserveCalculationInput,
     ReserveEngineConfig,
 )
-from apps.api.app.modules.reserve.engine import _classify_status, _metrics_from_months, calculate_reserve_preview
+from apps.api.app.modules.reserve.engine import (
+    _classify_status,
+    _metrics_from_months,
+    calculate_reserve_preview,
+)
 from apps.api.app.modules.reserve.repository import _month_window_start
 from apps.api.app.modules.reserve.service import calculate_and_persist, get_run_rows
 from apps.api.app.modules.reserve.strategies import WeightedRecentAverageStrategy

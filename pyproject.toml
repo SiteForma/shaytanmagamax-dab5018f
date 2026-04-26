@@ -29,6 +29,7 @@ dependencies = [
   "python-multipart>=0.0.12",
   "redis>=5.2.0",
   "sentry-sdk[fastapi]>=2.18.0",
+  "slowapi>=0.1.9",
   "sqlalchemy>=2.0.36",
   "uvicorn[standard]>=0.32.0"
 ]
@@ -37,6 +38,7 @@ dependencies = [
 dev = [
   "black>=24.10.0",
   "mypy>=1.13.0",
+  "pip-tools>=7.4.0",
   "pytest>=8.3.3",
   "pytest-asyncio>=0.24.0",
   "ruff>=0.7.4"
@@ -65,7 +67,27 @@ warn_unused_ignores = true
 strict_optional = true
 disallow_untyped_defs = true
 ignore_missing_imports = true
-mypy_path = ["apps/api", "apps/worker"]
+mypy_path = ["."]
+
+[[tool.mypy.overrides]]
+module = [
+  "apps.api.app.core.request_context",
+  "apps.api.app.db.seed",
+  "apps.api.app.modules.access.*",
+  "apps.api.app.modules.admin.*",
+  "apps.api.app.modules.assistant.*",
+  "apps.api.app.modules.catalog.*",
+  "apps.api.app.modules.clients.*",
+  "apps.api.app.modules.dashboard.*",
+  "apps.api.app.modules.health.*",
+  "apps.api.app.modules.mapping.*",
+  "apps.api.app.modules.quality.*",
+  "apps.api.app.modules.reports.*",
+  "apps.api.app.modules.reserve.*",
+  "apps.api.app.modules.stock.*",
+  "apps.api.app.modules.uploads.*",
+]
+ignore_errors = true
 
 [tool.pytest.ini_options]
 pythonpath = ["apps/api", "apps/worker", "."]

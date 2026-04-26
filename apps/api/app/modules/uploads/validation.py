@@ -340,8 +340,8 @@ def validate_frame(
                     )
                 )
             normalized["priority"] = _parse_int(normalized.get("priority")) or 1
-            normalized["active"] = True if normalized.get("active") is None else _parse_bool(
-                normalized.get("active")
+            normalized["active"] = (
+                True if normalized.get("active") is None else _parse_bool(normalized.get("active"))
             )
             if normalized.get("active") and normalized.get("client_name"):
                 client_key = str(normalized["client_name"]).strip().lower()

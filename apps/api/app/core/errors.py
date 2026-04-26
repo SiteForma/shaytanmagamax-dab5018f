@@ -50,9 +50,12 @@ def install_error_handlers(app: FastAPI) -> None:
             "http_exception",
             extra={"status_code": exc.status_code},
         )
-        detail = exc.detail if isinstance(exc.detail, dict) else {"detail": exc.detail}
+        detail: dict[str, object] = (
+            exc.detail if isinstance(exc.detail, dict) else {"detail": exc.detail}
+        )
         return JSONResponse(
             status_code=exc.status_code,
+            headers=exc.headers,
             content=ErrorEnvelope(
                 code="http_error",
                 message=str(detail.get("detail", exc.detail)),

@@ -22,15 +22,19 @@ from apps.api.app.modules.reserve.service import get_portfolio_rows
 
 
 def _diy_clients(db: Session) -> list[Client]:
-    return db.scalars(
-        select(Client)
-        .where(
-            Client.is_active.is_(True),
-            (Client.network_type == "DIY") | (Client.client_group == "DIY"),
+    return (
+        db.scalars(
+            select(Client)
+            .where(
+                Client.is_active.is_(True),
+                (Client.network_type == "DIY") | (Client.client_group == "DIY"),
+            )
+            .options(selectinload(Client.policies))
+            .order_by(Client.name)
         )
-        .options(selectinload(Client.policies))
-        .order_by(Client.name)
-    ).unique().all()
+        .unique()
+        .all()
+    )
 
 
 def _active_policy(client: Client) -> DiyPolicy | None:
@@ -67,7 +71,9 @@ def list_clients(db: Session) -> list[ClientSummaryResponse]:
     for row in rows:
         rows_by_client[row.client_id].append(row)
     return [
-        _build_summary(client, rows_by_client.get(client.id, []), latest_run_id=run.id if run else None)
+        _build_summary(
+            client, rows_by_client.get(client.id, []), latest_run_id=run.id if run else None
+        )
         for client in clients
     ]
 

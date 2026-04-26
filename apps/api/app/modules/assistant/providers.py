@@ -66,10 +66,7 @@ def _usage_from_response(payload: dict[str, Any], settings: Settings) -> Assista
     if not isinstance(usage, dict):
         return _empty_usage()
     input_tokens = int(
-        usage.get("prompt_tokens")
-        or usage.get("input_tokens")
-        or usage.get("inputTokens")
-        or 0
+        usage.get("prompt_tokens") or usage.get("input_tokens") or usage.get("inputTokens") or 0
     )
     output_tokens = int(
         usage.get("completion_tokens")
@@ -77,7 +74,9 @@ def _usage_from_response(payload: dict[str, Any], settings: Settings) -> Assista
         or usage.get("outputTokens")
         or 0
     )
-    total_tokens = int(usage.get("total_tokens") or usage.get("totalTokens") or input_tokens + output_tokens)
+    total_tokens = int(
+        usage.get("total_tokens") or usage.get("totalTokens") or input_tokens + output_tokens
+    )
     cost_usd = (
         input_tokens / 1_000_000 * settings.assistant_input_usd_per_1m_tokens
         + output_tokens / 1_000_000 * settings.assistant_output_usd_per_1m_tokens
@@ -150,7 +149,9 @@ def _apply_response(draft: AssistantAnswerDraft, payload: dict[str, Any]) -> Ass
     section_updates = payload.get("sections")
     if isinstance(section_updates, list):
         updates_by_id = {
-            str(item.get("id")): item for item in section_updates if isinstance(item, dict) and item.get("id")
+            str(item.get("id")): item
+            for item in section_updates
+            if isinstance(item, dict) and item.get("id")
         }
         updated_sections: list[dict[str, Any]] = []
         for section in result.sections:
@@ -166,7 +167,9 @@ def _apply_response(draft: AssistantAnswerDraft, payload: dict[str, Any]) -> Ass
                     and isinstance(update.get("items"), list)
                     and update["items"]
                 ):
-                    next_section["items"] = [str(item) for item in update["items"] if str(item).strip()]
+                    next_section["items"] = [
+                        str(item) for item in update["items"] if str(item).strip()
+                    ]
             updated_sections.append(next_section)
         result.sections = updated_sections
     return result
@@ -254,11 +257,22 @@ class OpenAICompatibleAssistantProvider:
             "Ты LLM-оркестратор MAGAMAX. Сначала интерпретируй любой запрос пользователя, затем "
             "выбери доменный intent и allowlisted инструменты, которые должны получить данные из БД. "
             "Не отвечай на вопрос сам. Не придумывай данные. Не вычисляй числа внутри LLM. "
+            "MAGAMAX AI — internal business analyst. Не отклоняй широкие бизнес-вопросы. "
+            "Если запрос можно разумно связать с рабочими данными MAGAMAX, выбери ближайший business intent "
+            "или задай clarification через missingFields/followupQuestion. "
+            "Never return unsupported for vague but business-like questions. Unsupported только для явно внешних тем. "
             "Если запрос касается работы MAGAMAX даже косвенно — загрузок, отчётов, продаж, "
             "товаров, товарных групп, прибыли, рентабельности, выручки, подразделений, SKU, "
             "склада, поставок, резервов, качества данных или dashboard — выбери ближайший доменный intent. "
             "Если вопрос явно про управленческий отчёт, 2025, товарные группы, прибыль, рентабельность "
             "или выручку, чаще всего нужен intent management_report_summary и tool get_management_report. "
+            "Примеры: «как в целом 2025 год закрыли?» -> management_report_summary или analytics_slice; "
+            "«что по 2025?» -> management_report_summary или clarification; "
+            "«как отработали март?» -> analytics_slice или clarification; "
+            "«где просели?» -> analytics_slice/period_comparison или clarification; "
+            "«помоги» -> free_chat; "
+            "«покажи проблемные» -> stock_risk_summary/reserve risk или clarification; "
+            "«что надо заказать?» -> stock_risk_summary + reserve shortage или clarification. "
             "Выбери ровно один intent из allowedIntents и один toolName только из allowedTools. "
             "Верни структурные params для tool по явным данным вопроса и истории. "
             "Не возвращай SQL, raw filters или параметры вне контракта tool. "
@@ -324,7 +338,9 @@ class OpenAICompatibleAssistantProvider:
                 raise TypeError("Провайдер вернул неожиданный planner content.")
             structured = json.loads(content)
         except (KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
-            raise AssistantProviderError("Провайдер вернул неподдерживаемый planner-формат.") from exc
+            raise AssistantProviderError(
+                "Провайдер вернул неподдерживаемый planner-формат."
+            ) from exc
         if not isinstance(structured, dict):
             raise AssistantProviderError("Провайдер вернул некорректный planner JSON.")
 
@@ -383,7 +399,9 @@ class OpenAICompatibleAssistantProvider:
             token_usage=_usage_from_response(payload, self._settings),
         )
 
-    def finalize(self, draft: AssistantAnswerDraft) -> tuple[AssistantAnswerDraft, AssistantTokenUsageData]:
+    def finalize(
+        self, draft: AssistantAnswerDraft
+    ) -> tuple[AssistantAnswerDraft, AssistantTokenUsageData]:
         endpoint = self._endpoint()
         try:
             with httpx.Client(timeout=10.0) as client:
@@ -406,11 +424,23 @@ class OpenAICompatibleAssistantProvider:
                 raise TypeError("Провайдер вернул неожиданный content.")
             structured = json.loads(content)
         except (KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
-            raise AssistantProviderError("Провайдер вернул неподдерживаемый формат ответа.") from exc
+            raise AssistantProviderError(
+                "Провайдер вернул неподдерживаемый формат ответа."
+            ) from exc
 
         if not isinstance(structured, dict):
             raise AssistantProviderError("Провайдер вернул некорректный JSON-объект.")
         return _apply_response(draft, structured), _usage_from_response(payload, self._settings)
+
+
+def _planner_intents_are_compatible(
+    deterministic_intent: AssistantIntent,
+    planned_intent: AssistantIntent,
+) -> bool:
+    if planned_intent == deterministic_intent:
+        return True
+    analytics_intents = {"analytics_slice", "sales_summary", "period_comparison"}
+    return deterministic_intent in analytics_intents and planned_intent in analytics_intents
 
 
 def plan_route_with_provider(
@@ -425,11 +455,21 @@ def plan_route_with_provider(
 
     provider = OpenAICompatibleAssistantProvider(settings)
     try:
-        return provider.plan_route(
+        plan = provider.plan_route(
             question=question,
             deterministic_intent=deterministic_intent,
             history=history or [],
         )
+        if deterministic_intent not in {
+            "free_chat",
+            "unsupported_or_ambiguous",
+        } and not _planner_intents_are_compatible(deterministic_intent, plan.intent):
+            # Deterministic routing is the safety rail for clear MAGAMAX business
+            # questions. The LLM planner may enrich params for the same intent, but
+            # it cannot silently switch a sales/stock/reserve question to an
+            # incompatible tool family.
+            return AssistantRoutePlan(intent=deterministic_intent, tool_question=question)
+        return plan
     except AssistantProviderError:
         # Planning failure must not break deterministic tool execution.
         return AssistantRoutePlan(intent=deterministic_intent, tool_question=question)
@@ -440,6 +480,12 @@ def finalize_with_provider(
     draft: AssistantAnswerDraft,
 ) -> tuple[AssistantAnswerDraft, str, list[AssistantWarningData], AssistantTokenUsageData]:
     if draft.intent == "unsupported_or_ambiguous" or draft.status == "unsupported":
+        provider = DeterministicAssistantProvider()
+        return provider.finalize(draft), provider.name, [], _empty_usage()
+    if draft.intent == "free_chat":
+        provider = DeterministicAssistantProvider()
+        return provider.finalize(draft), provider.name, [], _empty_usage()
+    if draft.response_type == "clarification":
         provider = DeterministicAssistantProvider()
         return provider.finalize(draft), provider.name, [], _empty_usage()
     if draft.tool_calls or draft.source_refs:

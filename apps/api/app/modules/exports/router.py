@@ -4,7 +4,11 @@ from fastapi import APIRouter, Depends, Query
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
-from apps.api.app.api.dependencies import get_settings_dependency, require_capability
+from apps.api.app.api.dependencies import (
+    get_settings_dependency,
+    require_capability,
+    require_export_rate_limit,
+)
 from apps.api.app.common.pagination import paginated_response
 from apps.api.app.common.schemas import PaginatedResponse
 from apps.api.app.core.config import Settings
@@ -41,6 +45,7 @@ router = APIRouter(prefix="/exports", tags=["exports"])
 def export_reserve_run_route(
     run_id: str,
     format: str = Query(default="xlsx", pattern="^(csv|xlsx)$"),
+    _: None = Depends(require_export_rate_limit),
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings_dependency),
     current_user: User = Depends(require_capability("exports", "generate")),
@@ -67,6 +72,7 @@ def export_reserve_run_route(
 @router.post("/stock-coverage", response_model=ExportJobResponse)
 def export_stock_coverage_route(
     payload: StockCoverageExportRequest,
+    _: None = Depends(require_export_rate_limit),
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings_dependency),
     current_user: User = Depends(require_capability("exports", "generate")),
@@ -78,7 +84,10 @@ def export_stock_coverage_route(
         action="exports.generate",
         target_type="export_job",
         target_id=job.id,
-        context={"export_type": job.export_type, "filters": payload.model_dump(mode="json", by_alias=True)},
+        context={
+            "export_type": job.export_type,
+            "filters": payload.model_dump(mode="json", by_alias=True),
+        },
     )
     db.commit()
     return job
@@ -87,6 +96,7 @@ def export_stock_coverage_route(
 @router.post("/dashboard/top-risk", response_model=ExportJobResponse)
 def export_dashboard_top_risk_route(
     payload: DashboardTopRiskExportRequest,
+    _: None = Depends(require_export_rate_limit),
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings_dependency),
     current_user: User = Depends(require_capability("exports", "generate")),
@@ -107,6 +117,7 @@ def export_dashboard_top_risk_route(
 @router.post("/quality/issues", response_model=ExportJobResponse)
 def export_quality_issues_route(
     payload: QualityIssuesExportRequest,
+    _: None = Depends(require_export_rate_limit),
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings_dependency),
     current_user: User = Depends(require_capability("exports", "generate")),
@@ -118,7 +129,10 @@ def export_quality_issues_route(
         action="exports.generate",
         target_type="export_job",
         target_id=job.id,
-        context={"export_type": job.export_type, "filters": payload.model_dump(mode="json", by_alias=True)},
+        context={
+            "export_type": job.export_type,
+            "filters": payload.model_dump(mode="json", by_alias=True),
+        },
     )
     db.commit()
     return job
@@ -127,6 +141,7 @@ def export_quality_issues_route(
 @router.post("/clients/exposure", response_model=ExportJobResponse)
 def export_client_exposure_route(
     payload: ClientExposureExportRequest,
+    _: None = Depends(require_export_rate_limit),
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings_dependency),
     current_user: User = Depends(require_capability("exports", "generate")),
@@ -138,7 +153,10 @@ def export_client_exposure_route(
         action="exports.generate",
         target_type="export_job",
         target_id=job.id,
-        context={"export_type": job.export_type, "filters": payload.model_dump(mode="json", by_alias=True)},
+        context={
+            "export_type": job.export_type,
+            "filters": payload.model_dump(mode="json", by_alias=True),
+        },
     )
     db.commit()
     return job
@@ -147,6 +165,7 @@ def export_client_exposure_route(
 @router.post("/report-packs/diy-exposure", response_model=ExportJobResponse)
 def export_diy_exposure_report_pack_route(
     payload: DiyExposureReportPackExportRequest,
+    _: None = Depends(require_export_rate_limit),
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings_dependency),
     current_user: User = Depends(require_capability("exports", "generate")),
@@ -158,7 +177,10 @@ def export_diy_exposure_report_pack_route(
         action="exports.generate",
         target_type="export_job",
         target_id=job.id,
-        context={"export_type": job.export_type, "filters": payload.model_dump(mode="json", by_alias=True)},
+        context={
+            "export_type": job.export_type,
+            "filters": payload.model_dump(mode="json", by_alias=True),
+        },
     )
     db.commit()
     return job
@@ -191,7 +213,10 @@ def get_export_job_route(
     current_user: User = Depends(require_capability("exports", "download")),
 ) -> ExportJobResponse:
     job = get_export_job(db, job_id)
-    if "admin" not in {role.role.code for role in current_user.roles} and job.requested_by_id != current_user.id:
+    if (
+        "admin" not in {role.role.code for role in current_user.roles}
+        and job.requested_by_id != current_user.id
+    ):
         raise DomainError(
             code="export_access_denied",
             message="Недостаточно прав для просмотра этого экспорта",

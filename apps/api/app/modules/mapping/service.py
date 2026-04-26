@@ -224,7 +224,9 @@ def list_supported_source_types() -> list[str]:
 def get_source_type_spec(source_type: str) -> SourceTypeSpec:
     spec = SOURCE_TYPE_SPECS.get(source_type)
     if spec is None:
-        raise DomainError(code="unsupported_source_type", message=f"Неподдерживаемый тип источника: {source_type}")
+        raise DomainError(
+            code="unsupported_source_type", message=f"Неподдерживаемый тип источника: {source_type}"
+        )
     return spec
 
 
@@ -318,7 +320,10 @@ def suggest_canonical_field(
             score = 1.0
         if any(template_tokens.get(token) == canonical_field for token in header_tokens):
             score = max(score, 0.99)
-        score = max(score, _score_token_match(header_tokens, _canonical_tokens(source_type, canonical_field)))
+        score = max(
+            score,
+            _score_token_match(header_tokens, _canonical_tokens(source_type, canonical_field)),
+        )
         ranked.append((canonical_field, round(score, 2)))
     ranked.sort(key=lambda item: item[1], reverse=True)
     top_candidates = [candidate for candidate, score in ranked[:3] if score >= 0.35]
@@ -440,7 +445,9 @@ def get_mapping_template(db: Session, template_id: str) -> MappingTemplate:
         .first()
     )
     if template is None:
-        raise DomainError(code="mapping_template_not_found", message="Шаблон сопоставления не найден")
+        raise DomainError(
+            code="mapping_template_not_found", message="Шаблон сопоставления не найден"
+        )
     return template
 
 

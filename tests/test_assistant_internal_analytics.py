@@ -77,7 +77,9 @@ def test_data_overview_is_read_only_and_source_aware(
     client.headers.update({"X-Dev-User": "user_assistant_internal_data_overview"})
     before = db_session.scalar(select(func.count()).select_from(ReserveRun))
 
-    response = client.post("/api/assistant/query", json={"text": "Покажи всё полезное, что есть в БД"})
+    response = client.post(
+        "/api/assistant/query", json={"text": "Покажи всё полезное, что есть в БД"}
+    )
 
     after = db_session.scalar(select(func.count()).select_from(ReserveRun))
     assert response.status_code == 200
@@ -170,7 +172,9 @@ def test_recalculate_reserve_requires_reserve_run_capability(
 
 
 def test_sales_summary_obi_march_2025(client: TestClient) -> None:
-    response = client.post("/api/assistant/query", json={"text": "Покажи продажи по OBI за март 2025"})
+    response = client.post(
+        "/api/assistant/query", json={"text": "Покажи продажи по OBI за март 2025"}
+    )
 
     assert response.status_code == 200
     payload = response.json()
@@ -204,9 +208,9 @@ def test_sales_followups_change_client_metric_and_dimension(client: TestClient) 
     ).json()["response"]
     assert qty["intent"] == "analytics_slice"
     qty_arguments = qty["toolCalls"][0]["arguments"]
-    assert qty_arguments.get("metric") in {"sales_qty", "quantity", None} or qty_arguments.get("metrics") == [
-        "sales_qty"
-    ]
+    assert qty_arguments.get("metric") in {"sales_qty", "quantity", None} or qty_arguments.get(
+        "metrics"
+    ) == ["sales_qty"]
 
     categories = client.post(
         f"/api/assistant/sessions/{session['id']}/messages",
@@ -261,7 +265,9 @@ def test_llm_finalizer_does_not_rewrite_tool_numbers(test_settings) -> None:
         title="Сводка продаж",
         summary="Выручка 123.45 ₽, продажи 67 шт.",
         sections=[],
-        source_refs=[{"sourceType": "sales", "sourceLabel": "Sales facts", "entityType": "sales_fact"}],
+        source_refs=[
+            {"sourceType": "sales", "sourceLabel": "Sales facts", "entityType": "sales_fact"}
+        ],
         tool_calls=[
             AssistantToolExecution(
                 tool_name="get_sales_summary",

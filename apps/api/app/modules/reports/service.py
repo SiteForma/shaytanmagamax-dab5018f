@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import re
 from collections import Counter
 from decimal import Decimal
-import re
 
 from sqlalchemy import Select, func, select
 from sqlalchemy.orm import Session
@@ -244,7 +244,9 @@ def list_management_report_rows(
     selected_import_id = _latest_import_id(db, import_id)
     if selected_import_id is None:
         return []
-    statement = select(ManagementReportRow).where(ManagementReportRow.import_id == selected_import_id)
+    statement = select(ManagementReportRow).where(
+        ManagementReportRow.import_id == selected_import_id
+    )
     if sheet_name:
         statement = statement.where(ManagementReportRow.sheet_name == sheet_name)
     rows = db.scalars(
@@ -255,7 +257,9 @@ def list_management_report_rows(
     return [_serialize_row(row) for row in rows]
 
 
-def list_organization_units(db: Session, *, import_id: str | None = None) -> list[OrganizationUnitResponse]:
+def list_organization_units(
+    db: Session, *, import_id: str | None = None
+) -> list[OrganizationUnitResponse]:
     selected_import_id = _latest_import_id(db, import_id)
     statement = select(OrganizationUnit).where(OrganizationUnit.unit_type == "department")
     if selected_import_id:
@@ -298,7 +302,11 @@ def _key_metric(
         return None
     return ManagementReportKeyMetric(
         label=label,
-        value=metric.metric_value if isinstance(metric.metric_value, Decimal) else Decimal(str(metric.metric_value)),
+        value=(
+            metric.metric_value
+            if isinstance(metric.metric_value, Decimal)
+            else Decimal(str(metric.metric_value))
+        ),
         unit=metric.metric_unit,
         year=metric.metric_year,
         dimension=metric.dimension_name,

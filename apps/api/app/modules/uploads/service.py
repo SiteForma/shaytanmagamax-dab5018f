@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import re
 from collections import Counter
 from datetime import date, datetime
-import re
 
 from fastapi import UploadFile
 from sqlalchemy import delete, func, select
@@ -149,9 +149,7 @@ def _finish_job_run(job_run: JobRun, *, error_message: str | None = None) -> Non
 def _jobs_for_batch(db: Session, batch_id: str) -> list[JobRun]:
     jobs = db.scalars(select(JobRun).order_by(JobRun.created_at.desc())).all()
     return [
-        job
-        for job in jobs
-        if job.payload.get("batch_id") == batch_id  # type: ignore[union-attr]
+        job for job in jobs if job.payload.get("batch_id") == batch_id  # type: ignore[union-attr]
     ]
 
 
@@ -229,7 +227,9 @@ def _preview_state(file_model: UploadFileModel, batch: UploadBatch) -> UploadPre
     )
 
 
-def _validation_state(batch: UploadBatch, issues: list[UploadedRowIssue]) -> UploadValidationSummaryResponse:
+def _validation_state(
+    batch: UploadBatch, issues: list[UploadedRowIssue]
+) -> UploadValidationSummaryResponse:
     payload = batch.validation_payload or {}
     issue_counts = _validation_issue_counts(payload)
     if issue_counts.total == 0 and issues:
@@ -283,10 +283,14 @@ def _source_detection_state(batch: UploadBatch) -> UploadSourceDetectionResponse
     return UploadSourceDetectionResponse(
         requires_confirmation=bool(payload.get("requires_confirmation", False)),
         confirmed=bool(payload.get("confirmed", False)),
-        detected_source_type=str(payload.get("detected_source_type") or batch.detected_source_type or batch.source_type),
+        detected_source_type=str(
+            payload.get("detected_source_type") or batch.detected_source_type or batch.source_type
+        ),
         selected_source_type=str(payload.get("selected_source_type") or batch.source_type),
         candidates=candidates,
-        custom_entity_name=str(payload["custom_entity_name"]) if payload.get("custom_entity_name") else None,
+        custom_entity_name=(
+            str(payload["custom_entity_name"]) if payload.get("custom_entity_name") else None
+        ),
     )
 
 
@@ -335,7 +339,9 @@ def _issues_for_batch(
     query = select(UploadedRowIssue).where(UploadedRowIssue.batch_id == batch_id)
     if file_id:
         query = query.where(UploadedRowIssue.file_id == file_id)
-    return session.scalars(query.order_by(UploadedRowIssue.row_number, UploadedRowIssue.created_at)).all()
+    return session.scalars(
+        query.order_by(UploadedRowIssue.row_number, UploadedRowIssue.created_at)
+    ).all()
 
 
 def _legacy_job_from_file(file_summary: UploadFileSummaryResponse) -> UploadJobResponse:
@@ -369,7 +375,9 @@ def _get_file_and_batch(db: Session, file_id: str) -> tuple[UploadFileModel, Upl
     return file_model, batch
 
 
-def _get_file_and_batch_by_batch_id(db: Session, batch_id: str) -> tuple[UploadFileModel, UploadBatch]:
+def _get_file_and_batch_by_batch_id(
+    db: Session, batch_id: str
+) -> tuple[UploadFileModel, UploadBatch]:
     batch = db.get(UploadBatch, batch_id)
     if batch is None or not batch.files:
         raise DomainError(code="upload_batch_not_found", message="Пакет загрузки не найден")
@@ -471,7 +479,11 @@ def _refresh_quality_issues(
 
 
 def _validation_payload_from_issues(
-    batch: UploadBatch, issues: list[ValidationIssue], valid_rows: int, failed_rows: int, warning_count: int
+    batch: UploadBatch,
+    issues: list[ValidationIssue],
+    valid_rows: int,
+    failed_rows: int,
+    warning_count: int,
 ) -> dict[str, object]:
     counts = Counter(issue.severity for issue in issues)
     has_blocking_issues = counts.get("error", 0) > 0 or counts.get("critical", 0) > 0
@@ -539,7 +551,9 @@ def _run_parse_stage(
             template = get_mapping_template(db, batch.mapping_template_id)
             template_mapping = {rule.source_header: rule.canonical_field for rule in template.rules}
 
-        suggestions = build_mapping_fields(frame, detected_source_type, template_mapping=template_mapping)
+        suggestions = build_mapping_fields(
+            frame, detected_source_type, template_mapping=template_mapping
+        )
         active_mapping = _active_mapping(suggestions)
         required_fields = set(list_required_fields(detected_source_type))
         missing_required = required_fields - set(active_mapping.values())
@@ -593,7 +607,9 @@ def _run_parse_stage(
                 "issue_counts": {"info": 0, "warning": 0, "error": 0, "critical": 0, "total": 0},
                 "source_type": detected_source_type,
             }
-            _transition_batch_status(batch, RAW_REPORT_REVIEW_STATUS, message="Сырой отчёт готов к просмотру")
+            _transition_batch_status(
+                batch, RAW_REPORT_REVIEW_STATUS, message="Сырой отчёт готов к просмотру"
+            )
         elif missing_required:
             missing_issues = [
                 ValidationIssue(
@@ -620,9 +636,13 @@ def _run_parse_stage(
                 failed_rows=0,
                 warning_count=0,
             )
-            _transition_batch_status(batch, "mapping_required", message="Не хватает обязательных канонических полей")
+            _transition_batch_status(
+                batch, "mapping_required", message="Не хватает обязательных канонических полей"
+            )
         else:
-            _transition_batch_status(batch, "validating", message="Запускаем автопроверку сопоставленной загрузки")
+            _transition_batch_status(
+                batch, "validating", message="Запускаем автопроверку сопоставленной загрузки"
+            )
         _finish_job_run(job_run)
         db.commit()
     except Exception as exc:
@@ -643,7 +663,9 @@ def validate_upload_file(
 
     mapping = batch.mapping_payload.get("active_mapping", {})
     if not mapping:
-        raise DomainError(code="mapping_required", message="Для загрузки не настроено сопоставление")
+        raise DomainError(
+            code="mapping_required", message="Для загрузки не настроено сопоставление"
+        )
 
     _transition_batch_status(batch, "validating", message="Проверяем сопоставленную загрузку")
     job_run = _create_job_run(db, batch.id, file_model.id, "validate_upload")
@@ -660,7 +682,9 @@ def validate_upload_file(
 
         batch.valid_rows = validation_result.valid_rows
         batch.failed_rows = validation_result.failed_rows
-        batch.warning_count = validation_result.warning_count + (1 if batch.duplicate_of_batch_id else 0)
+        batch.warning_count = validation_result.warning_count + (
+            1 if batch.duplicate_of_batch_id else 0
+        )
         batch.issue_count = len(issues)
         batch.validation_payload = _validation_payload_from_issues(
             batch,
@@ -672,7 +696,9 @@ def validate_upload_file(
         if batch.validation_payload.get("has_blocking_issues"):
             _transition_batch_status(batch, "issues_found", message="Найдены проблемы проверки")
         else:
-            _transition_batch_status(batch, "ready_to_apply", message="Загрузка готова к применению")
+            _transition_batch_status(
+                batch, "ready_to_apply", message="Загрузка готова к применению"
+            )
         _finish_job_run(job_run)
         db.commit()
         return get_upload_file_detail(db, file_id)
@@ -683,7 +709,9 @@ def validate_upload_file(
         raise
 
 
-def _get_or_create_product(db: Session, product_name: str | None, brand: str = "MAGAMAX") -> Product | None:
+def _get_or_create_product(
+    db: Session, product_name: str | None, brand: str = "MAGAMAX"
+) -> Product | None:
     if not product_name:
         return None
     existing = db.scalars(select(Product).where(Product.name == product_name)).first()
@@ -782,13 +810,7 @@ def _get_or_create_category_hierarchy(
 
 
 def normalize_code(value: str) -> str:
-    return (
-        value.lower()
-        .replace(" / ", "_")
-        .replace(" ", "_")
-        .replace("-", "_")
-        .replace("__", "_")
-    )
+    return value.lower().replace(" / ", "_").replace(" ", "_").replace("-", "_").replace("__", "_")
 
 
 def _apply_sales_row(
@@ -844,19 +866,27 @@ def _apply_stock_row(db: Session, batch: UploadBatch, row: dict[str, object]) ->
             source_batch_id=batch.id,
             sku_id=sku.id,
             warehouse_code=str(row.get("warehouse_name") or "UNKNOWN"),
-            snapshot_at=datetime.combine(snapshot_date, datetime.min.time(), tzinfo=utc_now().tzinfo),
+            snapshot_at=datetime.combine(
+                snapshot_date, datetime.min.time(), tzinfo=utc_now().tzinfo
+            ),
             free_stock_qty=float(row.get("stock_free") or 0),
-            reserved_like_qty=max(float(row.get("stock_total") or 0) - float(row.get("stock_free") or 0), 0),
+            reserved_like_qty=max(
+                float(row.get("stock_total") or 0) - float(row.get("stock_free") or 0), 0
+            ),
         )
     )
 
 
-def _apply_inbound_row(db: Session, batch: UploadBatch, row_index: int, row: dict[str, object]) -> None:
+def _apply_inbound_row(
+    db: Session, batch: UploadBatch, row_index: int, row: dict[str, object]
+) -> None:
     sku = resolve_sku_by_code_or_alias(db, str(row["sku_code"]))
     if sku is None:
         raise DomainError(code="unmatched_sku", message=f"SKU «{row['sku_code']}» не сопоставлен")
     external_ref = str(row.get("source_row_id") or f"{batch.id}:{row_index}")
-    existing = db.scalars(select(InboundDelivery).where(InboundDelivery.external_ref == external_ref)).first()
+    existing = db.scalars(
+        select(InboundDelivery).where(InboundDelivery.external_ref == external_ref)
+    ).first()
     if existing:
         existing.sku_id = sku.id
         existing.quantity = float(row["quantity"])
@@ -934,7 +964,9 @@ def _apply_normalized_row(
     if batch.source_type == "category_structure":
         _apply_category_row(db, row)
         return
-    raise DomainError(code="apply_not_supported", message="Для этого типа источника применение недоступно")
+    raise DomainError(
+        code="apply_not_supported", message="Для этого типа источника применение недоступно"
+    )
 
 
 def list_upload_files(
@@ -965,14 +997,18 @@ def list_upload_files_page(
     page: int = 1,
     page_size: int = 25,
 ) -> tuple[list[UploadFileSummaryResponse], int]:
-    stmt = select(UploadFileModel, UploadBatch).join(UploadBatch, UploadBatch.id == UploadFileModel.batch_id)
+    stmt = select(UploadFileModel, UploadBatch).join(
+        UploadBatch, UploadBatch.id == UploadFileModel.batch_id
+    )
     if status:
         stmt = stmt.where(UploadBatch.status == status)
     if source_type:
         stmt = stmt.where(UploadBatch.source_type == source_type)
     total = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
     rows = db.execute(
-        stmt.order_by(UploadFileModel.created_at.desc()).offset(max(page - 1, 0) * page_size).limit(page_size)
+        stmt.order_by(UploadFileModel.created_at.desc())
+        .offset(max(page - 1, 0) * page_size)
+        .limit(page_size)
     ).all()
     return ([_file_summary(file_model, batch) for file_model, batch in rows], int(total))
 
@@ -1069,7 +1105,9 @@ def save_upload_mapping(
                 canonical=canonical,
                 confidence=1.0 if canonical else 0.0,
                 status="ok" if canonical else "missing",
-                sample=None if parse_result.frame.empty else str(parse_result.frame.iloc[0][column]),
+                sample=(
+                    None if parse_result.frame.empty else str(parse_result.frame.iloc[0][column])
+                ),
                 required=canonical in required_fields if canonical else False,
             )
         )
@@ -1136,11 +1174,15 @@ def apply_upload_file(
 ) -> ApplyUploadResponse:
     file_model, batch = _get_file_and_batch(db, file_id)
     if not source_supports_apply(batch.source_type):
-        raise DomainError(code="apply_not_supported", message="Для этого типа источника применение недоступно")
+        raise DomainError(
+            code="apply_not_supported", message="Для этого типа источника применение недоступно"
+        )
 
     detail = validate_upload_file(db, settings, file_id)
     if detail.validation.has_blocking_issues:
-        raise DomainError(code="blocking_issues", message="Загрузка содержит блокирующие проблемы проверки")
+        raise DomainError(
+            code="blocking_issues", message="Загрузка содержит блокирующие проблемы проверки"
+        )
 
     _transition_batch_status(batch, "applying", message="Применяем нормализованные данные")
     job_run = _create_job_run(db, batch.id, file_model.id, "apply_upload")
@@ -1171,7 +1213,9 @@ def apply_upload_file(
                         code=exc.code,
                         severity="error",
                         message=exc.message,
-                        raw_payload={key: sanitize_value(value) for key, value in normalized_row.items()},
+                        raw_payload={
+                            key: sanitize_value(value) for key, value in normalized_row.items()
+                        },
                     )
                 )
 
@@ -1196,7 +1240,9 @@ def apply_upload_file(
 
         if applied_rows == 0 and persisted_issues:
             _transition_batch_status(batch, "failed", error="Не удалось применить ни одной строки")
-        elif batch.warning_count or any(issue.severity in BLOCKING_SEVERITIES for issue in apply_issues):
+        elif batch.warning_count or any(
+            issue.severity in BLOCKING_SEVERITIES for issue in apply_issues
+        ):
             _transition_batch_status(
                 batch,
                 "applied_with_warnings",
@@ -1206,7 +1252,9 @@ def apply_upload_file(
             _transition_batch_status(batch, "applied", message="Загрузка успешно применена")
 
         _finish_job_run(job_run)
-        analytics_job = _create_job_run(db, batch.id, file_model.id, "refresh_analytics", queue_name="analytics")
+        analytics_job = _create_job_run(
+            db, batch.id, file_model.id, "refresh_analytics", queue_name="analytics"
+        )
         materialize_analytics(db, settings)
         _finish_job_run(analytics_job)
         db.commit()

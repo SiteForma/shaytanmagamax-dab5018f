@@ -178,7 +178,9 @@ def tool_calculate_reserve(
     sku_ids = list(bundle.route.extracted_sku_ids)
     if bundle.context.selected_sku_id and bundle.context.selected_sku_id not in sku_ids:
         sku_ids.append(bundle.context.selected_sku_id)
-    category_ids = [bundle.context.selected_category_id] if bundle.context.selected_category_id else None
+    category_ids = (
+        [bundle.context.selected_category_id] if bundle.context.selected_category_id else None
+    )
     return _measure_tool(
         "calculate_reserve",
         {
@@ -257,7 +259,9 @@ def _filter_reserve_rows(
         filtered = [row for row in filtered if row.sku_id in sku_ids_for_category]
     if problematic_only:
         filtered = [row for row in filtered if row.status in {"critical", "warning", "no_history"}]
-    return sorted(filtered, key=lambda row: (row.shortage_qty, row.target_reserve_qty), reverse=True)
+    return sorted(
+        filtered, key=lambda row: (row.shortage_qty, row.target_reserve_qty), reverse=True
+    )
 
 
 def _get_reserve_payload(
@@ -311,7 +315,11 @@ def _get_reserve_payload(
             source_label=f"Сохранённый резерв {run.id}",
             entity_type="reserve_run",
             entity_id=run.id,
-            freshness_at=run.created_at.isoformat() if hasattr(run.created_at, "isoformat") else str(run.created_at),
+            freshness_at=(
+                run.created_at.isoformat()
+                if hasattr(run.created_at, "isoformat")
+                else str(run.created_at)
+            ),
             role="primary",
             route=f"/reserve?run={run.id}",
             detail=f"{len(filtered)} строк после фильтров, новых расчётов не запускалось",
@@ -387,7 +395,12 @@ def _calculate_reserve_payload(
             detail=f"{result.run.row_count} строк расчёта",
         )
     ]
-    return result, f"Сформирован reserve run {result.run.id} по {result.run.row_count} строкам", refs, []
+    return (
+        result,
+        f"Сформирован reserve run {result.run.id} по {result.run.row_count} строкам",
+        refs,
+        [],
+    )
 
 
 def tool_reserve_explanation(db: Session, bundle: AssistantContextBundle) -> AssistantToolExecution:
@@ -417,7 +430,9 @@ def _pick_reserve_row(
             filtered = client_filtered
     if not filtered:
         return None
-    return sorted(filtered, key=lambda row: (row.shortage_qty, row.target_reserve_qty), reverse=True)[0]
+    return sorted(
+        filtered, key=lambda row: (row.shortage_qty, row.target_reserve_qty), reverse=True
+    )[0]
 
 
 def _reserve_explanation_payload(
@@ -465,17 +480,17 @@ def _reserve_explanation_payload(
     refs = []
     if run is not None:
         refs.append(
-                _source_ref(
-                    source_type="reserve_engine",
-                    source_label=f"Запуск резерва {run.run.id}",
-                    entity_type="reserve_run",
-                    entity_id=run.run.id,
-                    freshness_at=run.run.created_at,
-                    role="primary",
-                    route=f"/reserve?run={run.run.id}",
-                    detail=f"Статус строки: {_status_label(row.status)}",
-                )
+            _source_ref(
+                source_type="reserve_engine",
+                source_label=f"Запуск резерва {run.run.id}",
+                entity_type="reserve_run",
+                entity_id=run.run.id,
+                freshness_at=run.run.created_at,
+                role="primary",
+                route=f"/reserve?run={run.run.id}",
+                detail=f"Статус строки: {_status_label(row.status)}",
             )
+        )
     refs.append(
         _source_ref(
             source_type="diy_policy",
@@ -508,7 +523,11 @@ def _sku_summary_payload(
             None,
             "SKU для сводки не определён",
             [],
-            [AssistantWarningData(code="missing_sku", message="Для SKU-сводки нужен SKU или pinned context.")],
+            [
+                AssistantWarningData(
+                    code="missing_sku", message="Для SKU-сводки нужен SKU или pinned context."
+                )
+            ],
         )
     detail = get_sku_detail(db, sku_id)
     if detail is None:
@@ -516,7 +535,11 @@ def _sku_summary_payload(
             None,
             "SKU не найден",
             [],
-            [AssistantWarningData(code="sku_not_found", message="Запрошенный SKU не найден.", severity="error")],
+            [
+                AssistantWarningData(
+                    code="sku_not_found", message="Запрошенный SKU не найден.", severity="error"
+                )
+            ],
         )
     refs = [
         _source_ref(
@@ -587,7 +610,11 @@ def _client_summary_payload(
             None,
             "Клиент для сводки не определён",
             [],
-            [AssistantWarningData(code="missing_client", message="Для client summary нужен клиент.")],
+            [
+                AssistantWarningData(
+                    code="missing_client", message="Для client summary нужен клиент."
+                )
+            ],
         )
     detail = get_client(db, client_id)
     if detail is None:
@@ -595,7 +622,13 @@ def _client_summary_payload(
             None,
             "Клиент не найден",
             [],
-            [AssistantWarningData(code="client_not_found", message="Запрошенный клиент не найден.", severity="error")],
+            [
+                AssistantWarningData(
+                    code="client_not_found",
+                    message="Запрошенный клиент не найден.",
+                    severity="error",
+                )
+            ],
         )
     rows = get_client_reserve_rows(db, client_id)
     top_skus = get_client_top_skus(db, client_id)
@@ -619,11 +652,16 @@ def _client_summary_payload(
             detail=f"{len(rows)} позиций, дефицит {detail.shortage_qty:.0f}",
         ),
     ]
-    return {
-        "detail": detail,
-        "rows": rows,
-        "top_skus": top_skus,
-    }, f"Получена сводка по клиенту {detail.name}", refs, []
+    return (
+        {
+            "detail": detail,
+            "rows": rows,
+            "top_skus": top_skus,
+        },
+        f"Получена сводка по клиенту {detail.name}",
+        refs,
+        [],
+    )
 
 
 def tool_get_inbound_impact(db: Session, bundle: AssistantContextBundle) -> AssistantToolExecution:
@@ -646,9 +684,7 @@ def _inbound_impact_payload(
         timeline = [item for item in timeline if item.sku_id == bundle.context.selected_sku_id]
     if bundle.context.selected_client_id:
         timeline = [
-            item
-            for item in timeline
-            if bundle.context.selected_client_id in item.affected_clients
+            item for item in timeline if bundle.context.selected_client_id in item.affected_clients
         ]
     timeline = sorted(timeline, key=lambda item: (item.reserve_impact, item.qty), reverse=True)
     refs = [
@@ -802,8 +838,12 @@ def _count_rows(db: Session, model: type[object]) -> int:
 def _data_overview_payload(
     db: Session,
 ) -> tuple[object, str, list[dict[str, object]], list[AssistantWarningData]]:
-    active_clients = int(db.scalar(select(func.count()).select_from(Client).where(Client.is_active.is_(True))) or 0)
-    active_skus = int(db.scalar(select(func.count()).select_from(Sku).where(Sku.active.is_(True))) or 0)
+    active_clients = int(
+        db.scalar(select(func.count()).select_from(Client).where(Client.is_active.is_(True))) or 0
+    )
+    active_skus = int(
+        db.scalar(select(func.count()).select_from(Sku).where(Sku.active.is_(True))) or 0
+    )
     category_count = _count_rows(db, Category)
 
     sales_count, sales_qty, sales_revenue, sales_min, sales_max = db.execute(
@@ -833,7 +873,9 @@ def _data_overview_payload(
     ).one()
 
     reserve_run_count = _count_rows(db, ReserveRun)
-    latest_run = db.scalars(select(ReserveRun).order_by(ReserveRun.created_at.desc()).limit(1)).first()
+    latest_run = db.scalars(
+        select(ReserveRun).order_by(ReserveRun.created_at.desc()).limit(1)
+    ).first()
     reserve_rows_count = _count_rows(db, ReserveRow)
     latest_reserve_shortage = 0.0
     latest_reserve_rows = 0
@@ -846,7 +888,9 @@ def _data_overview_payload(
         ).one()
 
     upload_count = _count_rows(db, UploadBatch)
-    latest_upload = db.scalars(select(UploadBatch).order_by(UploadBatch.created_at.desc()).limit(1)).first()
+    latest_upload = db.scalars(
+        select(UploadBatch).order_by(UploadBatch.created_at.desc()).limit(1)
+    ).first()
     upload_statuses = {
         status: int(count)
         for status, count in db.execute(
@@ -855,7 +899,10 @@ def _data_overview_payload(
     }
 
     open_quality_count = int(
-        db.scalar(select(func.count()).select_from(QualityIssue).where(QualityIssue.status == "open")) or 0
+        db.scalar(
+            select(func.count()).select_from(QualityIssue).where(QualityIssue.status == "open")
+        )
+        or 0
     )
     quality_by_severity = {
         severity: int(count)
@@ -956,7 +1003,11 @@ def _data_overview_payload(
             source_label=str(section["label"]),
             entity_type="data_overview",
             freshness_at=str(section["freshnessAt"]) if section.get("freshnessAt") else None,
-            role="primary" if section["key"] in {"sales", "reserve", "management_report"} else "supporting",
+            role=(
+                "primary"
+                if section["key"] in {"sales", "reserve", "management_report"}
+                else "supporting"
+            ),
             route=str(section["route"]),
             detail=str(section["summary"]),
         )
@@ -1067,7 +1118,11 @@ def _sales_summary_payload(
             {"status": "missing_fields"},
             "Для сводки продаж нужен корректный период",
             [],
-            [AssistantWarningData(code="missing_period", message="Укажите период продаж.", severity="warning")],
+            [
+                AssistantWarningData(
+                    code="missing_period", message="Укажите период продаж.", severity="warning"
+                )
+            ],
         )
     statement = select(
         func.coalesce(func.sum(SalesFact.quantity), 0),
@@ -1290,7 +1345,9 @@ def _group_key(values: dict[str, object], dimensions: list[str]) -> tuple[object
     return tuple(values.get(dimension) for dimension in dimensions)
 
 
-def _row_from_group(dimensions: list[str], key: tuple[object, ...], metrics: dict[str, float]) -> dict[str, object]:
+def _row_from_group(
+    dimensions: list[str], key: tuple[object, ...], metrics: dict[str, float]
+) -> dict[str, object]:
     row = {dimension: value for dimension, value in zip(dimensions, key, strict=False)}
     row.update({name: round(value, 4) for name, value in metrics.items()})
     return row
@@ -1305,7 +1362,10 @@ def _analytics_slice_payload(
     bundle: AssistantContextBundle,
     params: dict[str, object],
 ) -> tuple[object, str, list[dict[str, object]], list[AssistantWarningData]]:
-    metrics = [_normalize_metric_name(item) for item in _string_list(params.get("metrics") or params.get("metric"))]
+    metrics = [
+        _normalize_metric_name(item)
+        for item in _string_list(params.get("metrics") or params.get("metric"))
+    ]
     dimensions = [
         _normalize_dimension_name(item)
         for item in _string_list(params.get("dimensions") or params.get("dimension"))
@@ -1432,8 +1492,7 @@ def _analytics_slice_payload(
         )[:limit]
 
     totals = {
-        metric: round(sum(float(row.get(metric) or 0) for row in rows), 4)
-        for metric in metrics
+        metric: round(sum(float(row.get(metric) or 0) for row in rows), 4) for metric in metrics
     }
     status = "completed" if rows else "no_data"
     warnings = []
@@ -1453,7 +1512,9 @@ def _analytics_slice_payload(
             "dimensions": dimensions,
             "rows": rows,
             "totals": totals,
-            "date_from": _period_filter(params)[0].isoformat() if _period_filter(params)[0] else None,
+            "date_from": (
+                _period_filter(params)[0].isoformat() if _period_filter(params)[0] else None
+            ),
             "date_to": _period_filter(params)[1].isoformat() if _period_filter(params)[1] else None,
             "sort_by": sort_by or None,
             "sort_direction": sort_direction,
@@ -1486,9 +1547,14 @@ def _analytics_sales_rows(
         statement = statement.where(SalesFact.period_month >= date_from)
     if date_to:
         statement = statement.where(SalesFact.period_month <= date_to)
-    client_id = str(_filter_value(params, "client_id") or bundle.context.selected_client_id or "") or None
+    client_id = (
+        str(_filter_value(params, "client_id") or bundle.context.selected_client_id or "") or None
+    )
     sku_id = str(_filter_value(params, "sku_id") or bundle.context.selected_sku_id or "") or None
-    category_id = str(_filter_value(params, "category_id") or bundle.context.selected_category_id or "") or None
+    category_id = (
+        str(_filter_value(params, "category_id") or bundle.context.selected_category_id or "")
+        or None
+    )
     if client_id:
         statement = statement.where(SalesFact.client_id == client_id)
     if sku_id:
@@ -1514,7 +1580,9 @@ def _analytics_sales_rows(
             "quarter": f"{fact.period_month.year}-{_quarter_for_month(fact.period_month.month)}",
             "year": fact.period_month.year,
         }
-        item = grouped.setdefault(_group_key(values, dimensions), {metric: 0.0 for metric in metrics})
+        item = grouped.setdefault(
+            _group_key(values, dimensions), {metric: 0.0 for metric in metrics}
+        )
         if "sales_qty" in item:
             item["sales_qty"] += float(fact.quantity or 0)
         if "revenue" in item:
@@ -1538,8 +1606,13 @@ def _analytics_stock_rows(
             latest[snapshot.sku_id] = snapshot
     sku_cache = {item.id: item for item in db.scalars(select(Sku)).all()}
     category_cache = {item.id: item for item in db.scalars(select(Category)).all()}
-    selected_sku_id = str(_filter_value(params, "sku_id") or bundle.context.selected_sku_id or "") or None
-    selected_category_id = str(_filter_value(params, "category_id") or bundle.context.selected_category_id or "") or None
+    selected_sku_id = (
+        str(_filter_value(params, "sku_id") or bundle.context.selected_sku_id or "") or None
+    )
+    selected_category_id = (
+        str(_filter_value(params, "category_id") or bundle.context.selected_category_id or "")
+        or None
+    )
     grouped: dict[tuple[object, ...], dict[str, float]] = {}
     for snapshot in latest.values():
         sku = sku_cache.get(snapshot.sku_id)
@@ -1557,9 +1630,13 @@ def _analytics_stock_rows(
             "quarter": f"{snapshot.snapshot_at.year}-{_quarter_for_month(snapshot.snapshot_at.month)}",
             "year": snapshot.snapshot_at.year,
         }
-        item = grouped.setdefault(_group_key(values, dimensions), {metric: 0.0 for metric in metrics})
+        item = grouped.setdefault(
+            _group_key(values, dimensions), {metric: 0.0 for metric in metrics}
+        )
         if "stock_qty" in item:
-            item["stock_qty"] += float(snapshot.free_stock_qty or 0) + float(snapshot.reserved_like_qty or 0)
+            item["stock_qty"] += float(snapshot.free_stock_qty or 0) + float(
+                snapshot.reserved_like_qty or 0
+            )
         if "free_stock" in item:
             item["free_stock"] += float(snapshot.free_stock_qty or 0)
     return _sorted_metric_rows(dimensions, grouped, metrics, limit)
@@ -1574,7 +1651,9 @@ def _analytics_reserve_rows(
     limit: int,
 ) -> list[dict[str, object]]:
     _, reserve_rows = get_portfolio_rows(db)
-    client_id = str(_filter_value(params, "client_id") or bundle.context.selected_client_id or "") or None
+    client_id = (
+        str(_filter_value(params, "client_id") or bundle.context.selected_client_id or "") or None
+    )
     sku_id = str(_filter_value(params, "sku_id") or bundle.context.selected_sku_id or "") or None
     grouped: dict[tuple[object, ...], dict[str, float]] = {}
     for row in reserve_rows:
@@ -1588,7 +1667,9 @@ def _analytics_reserve_rows(
             "article": row.article,
             "category": row.category,
         }
-        item = grouped.setdefault(_group_key(values, dimensions), {metric: 0.0 for metric in metrics})
+        item = grouped.setdefault(
+            _group_key(values, dimensions), {metric: 0.0 for metric in metrics}
+        )
         if "reserve_qty" in item:
             item["reserve_qty"] += float(row.target_reserve_qty or 0)
         if "shortage_qty" in item:
@@ -1610,7 +1691,9 @@ def _analytics_inbound_rows(
     deliveries = db.scalars(select(InboundDelivery)).all()
     sku_cache = {item.id: item for item in db.scalars(select(Sku)).all()}
     category_cache = {item.id: item for item in db.scalars(select(Category)).all()}
-    selected_sku_id = str(_filter_value(params, "sku_id") or bundle.context.selected_sku_id or "") or None
+    selected_sku_id = (
+        str(_filter_value(params, "sku_id") or bundle.context.selected_sku_id or "") or None
+    )
     grouped: dict[tuple[object, ...], dict[str, float]] = {}
     for delivery in deliveries:
         if date_from and delivery.eta_date < date_from:
@@ -1629,7 +1712,9 @@ def _analytics_inbound_rows(
             "quarter": f"{delivery.eta_date.year}-{_quarter_for_month(delivery.eta_date.month)}",
             "year": delivery.eta_date.year,
         }
-        item = grouped.setdefault(_group_key(values, dimensions), {metric: 0.0 for metric in metrics})
+        item = grouped.setdefault(
+            _group_key(values, dimensions), {metric: 0.0 for metric in metrics}
+        )
         if "inbound_qty" in item:
             item["inbound_qty"] += float(delivery.quantity or 0)
     return _sorted_metric_rows(dimensions, grouped, metrics, limit)
@@ -1686,7 +1771,6 @@ def _sorted_metric_rows(
 ) -> list[dict[str, object]]:
     primary_metric = metrics[0]
     rows = [
-        _row_from_group(dimensions, key, metric_values)
-        for key, metric_values in grouped.items()
+        _row_from_group(dimensions, key, metric_values) for key, metric_values in grouped.items()
     ]
     return sorted(rows, key=lambda row: float(row.get(primary_metric) or 0), reverse=True)[:limit]

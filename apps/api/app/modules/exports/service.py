@@ -97,12 +97,18 @@ def serialize_export_job(job: ExportJob) -> ExportJobResponse:
         errorMessage=job.error_message,
         filtersPayload=dict(job.filters_payload or {}),
         summaryPayload=dict(job.summary_payload or {}),
-        downloadUrl=f"/api/exports/jobs/{job.id}/download" if job.storage_key and job.status == "completed" else None,
+        downloadUrl=(
+            f"/api/exports/jobs/{job.id}/download"
+            if job.storage_key and job.status == "completed"
+            else None
+        ),
         canDownload=bool(job.storage_key and job.status == "completed"),
     )
 
 
-def list_export_jobs(db: Session, *, current_user: User, status: str | None = None) -> list[ExportJobResponse]:
+def list_export_jobs(
+    db: Session, *, current_user: User, status: str | None = None
+) -> list[ExportJobResponse]:
     rows = db.scalars(select(ExportJob).order_by(ExportJob.created_at.desc())).all()
     if "admin" not in role_codes_for_user(current_user):
         rows = [row for row in rows if row.requested_by_id == current_user.id]
@@ -130,7 +136,7 @@ def list_export_jobs_page(
         .offset(page_offset(page, page_size))
         .limit(page_size)
     ).all()
-    return ( [serialize_export_job(row) for row in rows], int(total))
+    return ([serialize_export_job(row) for row in rows], int(total))
 
 
 def get_export_job(db: Session, job_id: str) -> ExportJob:
@@ -151,7 +157,9 @@ def _assert_download_access(job: ExportJob, current_user: User) -> None:
         )
 
 
-def export_download_path(db: Session, settings: Settings, *, job_id: str, current_user: User) -> Path:
+def export_download_path(
+    db: Session, settings: Settings, *, job_id: str, current_user: User
+) -> Path:
     job = get_export_job(db, job_id)
     _assert_download_access(job, current_user)
     if not job.storage_key or job.status != "completed":
@@ -264,7 +272,9 @@ def _build_reserve_run_plan(db: Session, job: ExportJob) -> ExportPlan:
     run_id = str(_payload_value(job.filters_payload, "run_id"))
     detail = get_run_detail(db, run_id)
     if detail is None:
-        raise DomainError(code="reserve_run_not_found", message="Расчёт резерва не найден", status_code=404)
+        raise DomainError(
+            code="reserve_run_not_found", message="Расчёт резерва не найден", status_code=404
+        )
     rows = get_run_rows(db, run_id)
     export_rows = [
         {
@@ -312,7 +322,9 @@ def _build_stock_coverage_plan(db: Session, job: ExportJob) -> ExportPlan:
         category=_payload_value(job.filters_payload, "category"),
         risk=str(_payload_value(job.filters_payload, "risk", default="all")),
         search=_payload_value(job.filters_payload, "search"),
-        sort_by=str(_payload_value(job.filters_payload, "sortBy", "sort_by", default="shortage_qty_total")),
+        sort_by=str(
+            _payload_value(job.filters_payload, "sortBy", "sort_by", default="shortage_qty_total")
+        ),
         sort_dir=str(_payload_value(job.filters_payload, "sortDir", "sort_dir", default="desc")),
     )
     export_rows = [
@@ -376,7 +388,9 @@ def _build_quality_issues_plan(db: Session, job: ExportJob) -> ExportPlan:
         severity=_payload_value(job.filters_payload, "severity"),
         issue_type=_payload_value(job.filters_payload, "type"),
         search=_payload_value(job.filters_payload, "search"),
-        sort_by=str(_payload_value(job.filters_payload, "sortBy", "sort_by", default="detected_at")),
+        sort_by=str(
+            _payload_value(job.filters_payload, "sortBy", "sort_by", default="detected_at")
+        ),
         sort_dir=str(_payload_value(job.filters_payload, "sortDir", "sort_dir", default="desc")),
     )
     export_rows = [
@@ -606,7 +620,9 @@ def retry_export_job(db: Session, settings: Settings, *, export_job_id: str) -> 
             default=job.row_count or settings.export_async_row_threshold,
         )
     )
-    run_async = _should_run_async(settings, export_type=job.export_type, estimated_rows=estimated_rows)
+    run_async = _should_run_async(
+        settings, export_type=job.export_type, estimated_rows=estimated_rows
+    )
     job.status = "queued" if run_async else "running"
     job.error_message = None
     job.completed_at = None
@@ -664,7 +680,9 @@ def export_reserve_run(
 ) -> ExportJobResponse:
     detail = get_run_detail(db, run_id)
     if detail is None:
-        raise DomainError(code="reserve_run_not_found", message="Расчёт резерва не найден", status_code=404)
+        raise DomainError(
+            code="reserve_run_not_found", message="Расчёт резерва не найден", status_code=404
+        )
     return _dispatch_export_job(
         db,
         settings,
@@ -788,7 +806,9 @@ def export_diy_exposure_report_pack(
             message="Report pack доступен только в формате XLSX",
             status_code=409,
         )
-    estimated_rows = int(db.scalar(select(func.count()).select_from(Client)) or 0) + len(get_top_risk_skus(db))
+    estimated_rows = int(db.scalar(select(func.count()).select_from(Client)) or 0) + len(
+        get_top_risk_skus(db)
+    )
     return _dispatch_export_job(
         db,
         settings,

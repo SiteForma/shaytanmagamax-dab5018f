@@ -78,14 +78,21 @@ def test_assistant_eval_suite_has_required_coverage() -> None:
     assert len(cases) >= 40
     ids = {case["id"] for case in cases}
     assert len(ids) == len(cases)
-    assert {"sales_by_client_month", "followup_change_client", "compare_sales_years", "data_overview"}.issubset(ids)
+    assert {
+        "sales_by_client_month",
+        "followup_change_client",
+        "compare_sales_years",
+        "data_overview",
+    }.issubset(ids)
 
 
 def test_assistant_eval_suite(client: TestClient, db_session: Session) -> None:
     cases = _load_cases()
 
     for case in cases:
-        session = client.post("/api/assistant/sessions", json={"title": f"eval:{case['id']}"}).json()
+        session = client.post(
+            "/api/assistant/sessions", json={"title": f"eval:{case['id']}"}
+        ).json()
         expect = case.get("expect") or {}
         must_not_create = list(expect.get("must_not_create") or [])
         expected_creates = list(expect.get("creates") or [])
@@ -100,7 +107,9 @@ def test_assistant_eval_suite(client: TestClient, db_session: Session) -> None:
                 f"/api/assistant/sessions/{session['id']}/messages",
                 json={"text": message["text"]},
             )
-            assert result.status_code == 200, f"{case['id']} failed with {result.status_code}: {result.text}"
+            assert (
+                result.status_code == 200
+            ), f"{case['id']} failed with {result.status_code}: {result.text}"
             response = result.json()["response"]
             if index == 0:
                 first_response = response
@@ -130,9 +139,15 @@ def test_assistant_eval_suite(client: TestClient, db_session: Session) -> None:
         if expected_tool_args := expect.get("tool_args"):
             _assert_tool_args(_tool_args(final_response, expect.get("tool")), expected_tool_args)
         if expected_current := expect.get("current_period"):
-            assert _tool_args(final_response, expect.get("tool")).get("current_period") == expected_current
+            assert (
+                _tool_args(final_response, expect.get("tool")).get("current_period")
+                == expected_current
+            )
         if expected_previous := expect.get("previous_period"):
-            assert _tool_args(final_response, expect.get("tool")).get("previous_period") == expected_previous
+            assert (
+                _tool_args(final_response, expect.get("tool")).get("previous_period")
+                == expected_previous
+            )
 
         text = _response_text(final_response)
         for phrase in expect.get("must_include") or []:

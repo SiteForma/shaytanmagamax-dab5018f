@@ -15,7 +15,9 @@ STATUS_RANK = {
 }
 
 
-def summarize_reserve_rows(rows: list[ReserveRowResponse]) -> tuple[dict[str, float | int | None], dict[str, int]]:
+def summarize_reserve_rows(
+    rows: list[ReserveRowResponse],
+) -> tuple[dict[str, float | int | None], dict[str, int]]:
     coverage_values = [row.coverage_months for row in rows if row.coverage_months is not None]
     status_counts = Counter(row.status for row in rows)
     totals: dict[str, float | int | None] = {
@@ -26,9 +28,9 @@ def summarize_reserve_rows(rows: list[ReserveRowResponse]) -> tuple[dict[str, fl
         "total_shortage_qty": round(sum(row.shortage_qty for row in rows), 1),
         "total_target_reserve_qty": round(sum(row.target_reserve_qty for row in rows), 1),
         "total_available_qty": round(sum(row.available_qty for row in rows), 1),
-        "avg_coverage_months": round(sum(coverage_values) / len(coverage_values), 1)
-        if coverage_values
-        else None,
+        "avg_coverage_months": (
+            round(sum(coverage_values) / len(coverage_values), 1) if coverage_values else None
+        ),
     }
     return totals, dict(status_counts)
 
@@ -54,7 +56,9 @@ def aggregate_top_risk_skus(rows: list[ReserveRowResponse]) -> list[dict[str, ob
         bucket["category_name"] = row.category
         if row.shortage_qty > 0 or row.status in {"critical", "warning"}:
             bucket["affected_clients_count"] = int(bucket["affected_clients_count"]) + 1
-        bucket["shortage_qty_total"] = round(float(bucket["shortage_qty_total"]) + row.shortage_qty, 1)
+        bucket["shortage_qty_total"] = round(
+            float(bucket["shortage_qty_total"]) + row.shortage_qty, 1
+        )
         current_min = bucket["min_coverage_months"]
         if row.coverage_months is not None:
             bucket["min_coverage_months"] = (
@@ -66,7 +70,10 @@ def aggregate_top_risk_skus(rows: list[ReserveRowResponse]) -> list[dict[str, ob
             bucket["worst_status"] = row.status
     return sorted(
         sku_rollup.values(),
-        key=lambda item: (float(item["shortage_qty_total"]), STATUS_RANK[str(item["worst_status"])]),
+        key=lambda item: (
+            float(item["shortage_qty_total"]),
+            STATUS_RANK[str(item["worst_status"])],
+        ),
         reverse=True,
     )
 
@@ -95,7 +102,9 @@ def aggregate_exposed_clients(rows: list[ReserveRowResponse]) -> list[dict[str, 
         bucket["warning_positions"] = int(bucket["warning_positions"]) + (
             1 if row.status == "warning" else 0
         )
-        bucket["shortage_qty_total"] = round(float(bucket["shortage_qty_total"]) + row.shortage_qty, 1)
+        bucket["shortage_qty_total"] = round(
+            float(bucket["shortage_qty_total"]) + row.shortage_qty, 1
+        )
         if row.coverage_months is not None:
             bucket["coverage_values"].append(row.coverage_months)
         bucket["inbound_relief_qty"] = round(
@@ -114,19 +123,29 @@ def aggregate_exposed_clients(rows: list[ReserveRowResponse]) -> list[dict[str, 
 
 def aggregate_coverage_distribution(rows: list[ReserveRowResponse]) -> list[CoverageBucketResponse]:
     buckets = Counter(
-        "no_history"
-        if row.status == "no_history"
-        else "overstocked"
-        if row.status == "overstocked"
-        else "under_1m"
-        if row.coverage_months is not None and row.coverage_months < 1
-        else "between_1m_and_target"
-        if row.status in {"critical", "warning"}
-        else "healthy"
+        (
+            "no_history"
+            if row.status == "no_history"
+            else (
+                "overstocked"
+                if row.status == "overstocked"
+                else (
+                    "under_1m"
+                    if row.coverage_months is not None and row.coverage_months < 1
+                    else (
+                        "between_1m_and_target"
+                        if row.status in {"critical", "warning"}
+                        else "healthy"
+                    )
+                )
+            )
+        )
         for row in rows
     )
     ordered = ["no_history", "under_1m", "between_1m_and_target", "healthy", "overstocked"]
-    return [CoverageBucketResponse(bucket=bucket, count=buckets.get(bucket, 0)) for bucket in ordered]
+    return [
+        CoverageBucketResponse(bucket=bucket, count=buckets.get(bucket, 0)) for bucket in ordered
+    ]
 
 
 def aggregate_inbound_vs_shortage(
@@ -149,7 +168,9 @@ def aggregate_inbound_vs_shortage(
     ]
 
 
-def aggregate_client_top_skus(rows: list[ReserveRowResponse], client_id: str) -> list[dict[str, object]]:
+def aggregate_client_top_skus(
+    rows: list[ReserveRowResponse], client_id: str
+) -> list[dict[str, object]]:
     selected_rows = [row for row in rows if row.client_id == client_id]
     return [
         {
@@ -163,11 +184,17 @@ def aggregate_client_top_skus(rows: list[ReserveRowResponse], client_id: str) ->
             "target_reserve_qty": row.target_reserve_qty,
             "available_qty": row.available_qty,
         }
-        for row in sorted(selected_rows, key=lambda item: (item.shortage_qty, STATUS_RANK[item.status]), reverse=True)[:10]
+        for row in sorted(
+            selected_rows,
+            key=lambda item: (item.shortage_qty, STATUS_RANK[item.status]),
+            reverse=True,
+        )[:10]
     ]
 
 
-def aggregate_client_category_exposure(rows: list[ReserveRowResponse], client_id: str) -> list[dict[str, object]]:
+def aggregate_client_category_exposure(
+    rows: list[ReserveRowResponse], client_id: str
+) -> list[dict[str, object]]:
     selected_rows = [row for row in rows if row.client_id == client_id]
     exposure: dict[str, dict[str, object]] = defaultdict(
         lambda: {"category_name": "Unassigned", "positions": 0, "shortage_qty_total": 0.0}
@@ -177,15 +204,23 @@ def aggregate_client_category_exposure(rows: list[ReserveRowResponse], client_id
         bucket = exposure[key]
         bucket["category_name"] = key
         bucket["positions"] = int(bucket["positions"]) + 1
-        bucket["shortage_qty_total"] = round(float(bucket["shortage_qty_total"]) + row.shortage_qty, 1)
-    return sorted(exposure.values(), key=lambda item: float(item["shortage_qty_total"]), reverse=True)
+        bucket["shortage_qty_total"] = round(
+            float(bucket["shortage_qty_total"]) + row.shortage_qty, 1
+        )
+    return sorted(
+        exposure.values(), key=lambda item: float(item["shortage_qty_total"]), reverse=True
+    )
 
 
-def aggregate_sku_reserve_summary(rows: list[ReserveRowResponse], sku_id: str) -> dict[str, object] | None:
+def aggregate_sku_reserve_summary(
+    rows: list[ReserveRowResponse], sku_id: str
+) -> dict[str, object] | None:
     selected_rows = [row for row in rows if row.sku_id == sku_id]
     if not selected_rows:
         return None
-    coverage_values = [row.coverage_months for row in selected_rows if row.coverage_months is not None]
+    coverage_values = [
+        row.coverage_months for row in selected_rows if row.coverage_months is not None
+    ]
     worst_status = max(selected_rows, key=lambda row: STATUS_RANK[row.status]).status
     return {
         "sku_id": sku_id,
@@ -194,9 +229,9 @@ def aggregate_sku_reserve_summary(rows: list[ReserveRowResponse], sku_id: str) -
         "category_name": selected_rows[0].category,
         "affected_clients_count": len(selected_rows),
         "shortage_qty_total": round(sum(row.shortage_qty for row in selected_rows), 1),
-        "avg_coverage_months": round(sum(coverage_values) / len(coverage_values), 1)
-        if coverage_values
-        else None,
+        "avg_coverage_months": (
+            round(sum(coverage_values) / len(coverage_values), 1) if coverage_values else None
+        ),
         "worst_status": worst_status,
     }
 

@@ -85,7 +85,9 @@ def get_dashboard_overview(db: Session) -> DashboardOverviewResponse:
         active_diy_clients=len({client.id for client in db.scalars(select(Client)).all()}),
         positions_at_risk=int(totals["positions_at_risk"]),
         total_shortage_qty=float(totals["total_shortage_qty"]),
-        inbound_qty_within_horizon=round(sum(item["inbound_qty"] for item in inbound_vs_shortage), 1),
+        inbound_qty_within_horizon=round(
+            sum(item["inbound_qty"] for item in inbound_vs_shortage), 1
+        ),
         avg_coverage_months=totals["avg_coverage_months"],  # type: ignore[arg-type]
         assistant_api_cost_rub=_assistant_api_cost_rub(db),
         open_quality_issues=open_quality_issues,

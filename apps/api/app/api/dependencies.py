@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from fastapi import Depends, Header
+from fastapi import Depends, Header, HTTPException, Request
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
 from apps.api.app.core.config import Settings, get_settings
 from apps.api.app.core.errors import DomainError
+from apps.api.app.core.rate_limit import enforce_fixed_window_rate_limit
 from apps.api.app.core.security import decode_access_token
 from apps.api.app.db.models import User, UserRole
 from apps.api.app.db.session import get_db
@@ -23,22 +24,28 @@ def get_settings_dependency() -> Settings:
 
 
 def get_current_user(
+    request: Request,
     token: str | None = Depends(oauth2_scheme),
     x_dev_user: str | None = Header(default=None),
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings_dependency),
 ) -> User | None:
+    if x_dev_user and settings.app_env != "development":
+        raise HTTPException(status_code=403, detail="Dev auth disabled in production")
     user_id: str | None = x_dev_user if settings.app_env == "development" else None
     if token:
         payload = decode_access_token(settings, token)
         user_id = payload.get("sub")
     if not user_id:
         return None
-    return db.scalar(
+    user = db.scalar(
         select(User)
         .options(joinedload(User.roles).joinedload(UserRole.role))
         .where(User.id == user_id)
     )
+    if user is not None:
+        request.state.current_user_id = user.id
+    return user
 
 
 def require_user(current_user: User | None = Depends(get_current_user)) -> User:
@@ -76,3 +83,31 @@ def require_capability(resource: str, action: str) -> Callable[..., User]:
         )
 
     return dependency
+
+
+def require_authenticated_rate_limit(
+    request: Request,
+    current_user: User = Depends(require_user),
+    settings: Settings = Depends(get_settings_dependency),
+) -> None:
+    enforce_fixed_window_rate_limit(
+        request,
+        settings,
+        key=f"user:{current_user.id}:authenticated",
+        limit=120,
+        window_seconds=60,
+    )
+
+
+def require_export_rate_limit(
+    request: Request,
+    current_user: User = Depends(require_user),
+    settings: Settings = Depends(get_settings_dependency),
+) -> None:
+    enforce_fixed_window_rate_limit(
+        request,
+        settings,
+        key=f"user:{current_user.id}:exports",
+        limit=5,
+        window_seconds=60,
+    )

@@ -34,7 +34,7 @@ class Settings(BaseSettings):
 
     jwt_secret: str = "change-me-for-production"
     jwt_algorithm: str = "HS256"
-    jwt_expires_minutes: int = 480
+    jwt_expires_minutes: int = 60
 
     assistant_provider: Literal["deterministic", "openai_compatible"] = "deterministic"
     assistant_llm_enabled: bool = False
@@ -91,8 +91,15 @@ class Settings(BaseSettings):
             errors.append("DATABASE_URL must point to PostgreSQL in production")
         if self.jwt_secret == "change-me-for-production" or len(self.jwt_secret) < 32:
             errors.append("JWT_SECRET must be a non-default secret with at least 32 characters")
-        if self.dev_admin_email == "admin@magamax.local" or self.dev_admin_password == "magamax-admin":
-            errors.append("DEV_ADMIN_EMAIL/DEV_ADMIN_PASSWORD must not use local defaults in production")
+        if self.dev_admin_email == "admin@magamax.local" or self.dev_admin_password in {
+            "magamax-admin",
+            "admin",
+            "password",
+            "",
+        }:
+            errors.append(
+                "DEV_ADMIN_EMAIL/DEV_ADMIN_PASSWORD must not use local defaults in production"
+            )
         if self.startup_schema_mode != "migrations_only":
             errors.append("STARTUP_SCHEMA_MODE must be migrations_only in production")
         if self.startup_seed_sample_data:
@@ -111,7 +118,11 @@ class Settings(BaseSettings):
             or not self.s3_access_key
             or not self.s3_secret_key
         ):
-            errors.append("S3_ENDPOINT_URL, S3_BUCKET, S3_ACCESS_KEY and S3_SECRET_KEY are required")
+            errors.append(
+                "S3_ENDPOINT_URL, S3_BUCKET, S3_ACCESS_KEY and S3_SECRET_KEY are required"
+            )
+        if self.s3_secret_key in {"minioadmin", "minio", ""}:
+            errors.append("S3_SECRET_KEY must not use local defaults in production")
         if not self.sentry_dsn:
             errors.append("SENTRY_DSN is required in production")
         if not self.otel_enabled:
