@@ -22,6 +22,7 @@ Capability examples:
 - `mapping:read`
 - `mapping:write`
 - `quality:read`
+- `inbound:sync`
 - `assistant:query`
 - `exports:generate`
 - `exports:download`
@@ -61,6 +62,9 @@ Protected by router-level `require_user + require_capability`:
 
 Mixed-capability surfaces keep route-level checks per endpoint:
 
+- `inbound`
+  - timeline read is covered by `inbound:read`
+  - Google Sheet manual sync requires `inbound:sync`
 - `exports`
   - generation routes require `exports:generate`
   - job listing/detail/download routes require `exports:download`
@@ -93,6 +97,7 @@ The following routes remain open by design and are not product-data read surface
 - read access to operational surfaces
 - can run reserve
 - can upload, validate, apply, map, export
+- can manually sync inbound Google Sheet data
 - can inspect admin/operator panel but cannot change user roles
 
 `analyst`
@@ -100,6 +105,7 @@ The following routes remain open by design and are not product-data read surface
 - read access to analytical surfaces
 - can run reserve
 - can upload, map, apply, export
+- can manually sync inbound Google Sheet data
 - no admin panel access
 
 `viewer`
@@ -108,6 +114,7 @@ The following routes remain open by design and are not product-data read surface
 - can read reserve, uploads, and mapping review surfaces
 - can open assistant queries
 - cannot mutate uploads, mapping, reserve, or exports
+- cannot trigger inbound Google Sheet sync
 
 ## Frontend behavior
 

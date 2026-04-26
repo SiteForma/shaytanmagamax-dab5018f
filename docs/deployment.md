@@ -28,6 +28,10 @@ Analytics and storage:
 - `EXPORT_ROOT`
 - `EXPORT_ASYNC_ENABLED`
 - `EXPORT_ASYNC_ROW_THRESHOLD`
+- `INBOUND_GOOGLE_SHEET_ID`
+- `INBOUND_GOOGLE_SHEET_GID`
+- optional `INBOUND_GOOGLE_SHEET_EXPORT_URL`
+- `INBOUND_GOOGLE_SHEET_SYNC_HOUR_MOSCOW`
 
 Assistant:
 
@@ -54,6 +58,7 @@ Observability:
 - rotate assistant/provider secrets outside the repo
 - enable async export flow for large artifacts
 - run a dedicated worker process for `ingestion`, `analytics` and `exports`
+- run `python -m apps.worker.worker_app.scheduler` if daily Google Sheet inbound sync is enabled
 - enable Sentry and OpenTelemetry before daily production operations
 - keep FastAPI runtime migrations-only: application startup must not create or mutate schema
 
@@ -86,6 +91,7 @@ Recommended production runtime commands:
 alembic upgrade head
 uvicorn apps.api.app.main:app --host 0.0.0.0 --port 8000
 dramatiq apps.worker.worker_app.tasks
+python -m apps.worker.worker_app.scheduler
 ```
 
 Local staging-like verification:

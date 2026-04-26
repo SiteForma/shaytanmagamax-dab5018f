@@ -1,0 +1,497 @@
+- id: sales_by_client_month
+  title: Продажи по клиенту за месяц
+  messages:
+    - role: user
+      text: Покажи продажи по OBI за март 2025
+  expect:
+    intent: analytics_slice
+    tool: get_analytics_slice
+    status: completed
+    must_include: [client_3, "2025-03-01"]
+    must_not_include: [вероятно, примерно]
+    must_not_create: [reserve_run]
+    source_refs: true
+
+- id: revenue_leroy_year
+  title: Выручка по Леруа за год
+  messages:
+    - role: user
+      text: Покажи выручку по Леруа за 2025
+  expect:
+    intent: analytics_slice
+    tool: get_analytics_slice
+    source_refs: true
+
+- id: sales_qty_obi_month
+  title: Продажи в штуках по OBI
+  messages:
+    - role: user
+      text: Покажи продажи в штуках по OBI за март 2025
+  expect:
+    intent: analytics_slice
+    tool: get_analytics_slice
+    tool_args:
+      metrics: [sales_qty]
+
+- id: top_clients_revenue
+  title: Топ клиентов по выручке
+  messages:
+    - role: user
+      text: Покажи топ клиентов по выручке за 2025
+  expect:
+    intent: analytics_slice
+    tool: get_analytics_slice
+    tool_args:
+      dimensions: [client]
+
+- id: top_sku_sales
+  title: Топ SKU по продажам
+  messages:
+    - role: user
+      text: Покажи топ SKU по продажам за март 2025
+  expect:
+    intent: analytics_slice
+    tool: get_analytics_slice
+    tool_args:
+      dimensions: [sku, article]
+
+- id: sales_by_category_month
+  title: Продажи по категориям
+  messages:
+    - role: user
+      text: Покажи продажи по категориям за март 2025
+  expect:
+    intent: analytics_slice
+    tool: get_analytics_slice
+    tool_args:
+      dimensions: [category]
+
+- id: clients_declined_march
+  title: Клиенты, просевшие в марте
+  messages:
+    - role: user
+      text: Какие клиенты просели в марте?
+  expect:
+    intent: analytics_slice
+    tool: get_analytics_slice
+
+- id: worst_selling_march
+  title: Худшие продажи в марте
+  messages:
+    - role: user
+      text: Что хуже всего продавалось в марте?
+  expect:
+    intent: analytics_slice
+    tool: get_analytics_slice
+
+- id: monthly_sales_dynamics
+  title: Динамика продаж по месяцам
+  messages:
+    - role: user
+      text: Покажи динамику продаж по месяцам за 2025
+  expect:
+    intent: analytics_slice
+    tool: get_analytics_slice
+    tool_args:
+      dimensions: [month]
+
+- id: compare_sales_years
+  title: Сравнение продаж 2025 с 2024
+  messages:
+    - role: user
+      text: Сравни продажи 2025 с 2024
+  expect:
+    intent: period_comparison
+    tool: get_period_comparison
+
+- id: followup_change_client
+  title: Follow-up меняет клиента, сохраняет метрику и период
+  messages:
+    - role: user
+      text: Покажи продажи по OBI за март 2025
+    - role: user
+      text: А по Леруа?
+  expect:
+    intent: analytics_slice
+    tool: get_analytics_slice
+    preserved: [period, metric]
+    changed: [client]
+
+- id: followup_qty
+  title: Follow-up меняет метрику на штуки
+  messages:
+    - role: user
+      text: Покажи продажи по OBI за март 2025
+    - role: user
+      text: А в штуках?
+  expect:
+    intent: analytics_slice
+    tool: get_analytics_slice
+    tool_args:
+      metrics: [sales_qty]
+
+- id: followup_category
+  title: Follow-up меняет измерение на категории
+  messages:
+    - role: user
+      text: Покажи продажи по OBI за март 2025
+    - role: user
+      text: А по категориям?
+  expect:
+    intent: analytics_slice
+    tool: get_analytics_slice
+    tool_args:
+      dimensions: [category]
+
+- id: followup_compare_previous_month
+  title: Follow-up сравнивает с прошлым месяцем
+  messages:
+    - role: user
+      text: Покажи продажи по OBI за март 2025
+    - role: user
+      text: Сравни с прошлым месяцем
+  expect:
+    intent: period_comparison
+    tool: get_period_comparison
+    current_period: "2025-03"
+    previous_period: "2025-02"
+
+- id: followup_problematic_after_top_sku
+  title: Follow-up добавляет проблемный фильтр
+  messages:
+    - role: user
+      text: Покажи топ SKU по OBI за март 2025
+    - role: user
+      text: Покажи только проблемные
+  expect:
+    intent: analytics_slice
+    tool: get_analytics_slice
+
+- id: followup_sort_decline
+  title: Follow-up сортирует по падению
+  messages:
+    - role: user
+      text: Покажи выручку по клиентам за 2025
+    - role: user
+      text: Отсортируй по падению
+  expect:
+    intent: analytics_slice
+    tool: get_analytics_slice
+    tool_args:
+      sort_direction: asc
+
+- id: followup_category_to_sku
+  title: Follow-up меняет категории на SKU
+  messages:
+    - role: user
+      text: Покажи продажи по категориям за март 2025
+    - role: user
+      text: А теперь по SKU
+  expect:
+    intent: analytics_slice
+    tool: get_analytics_slice
+    tool_args:
+      dimensions: [sku, article]
+
+- id: clarification_then_period
+  title: Уточнение периода продолжает intent
+  messages:
+    - role: user
+      text: Покажи продажи по OBI
+    - role: user
+      text: За март 2025
+  expect:
+    intent: analytics_slice
+    tool: get_analytics_slice
+    pending_was: analytics_slice
+
+- id: reserve_show_obi
+  title: Read-only резерв по OBI
+  messages:
+    - role: user
+      text: Покажи резерв по OBI
+  expect:
+    intent: reserve_calculation
+    tool: get_reserve
+    must_not_create: [reserve_run]
+
+- id: reserve_explain_followup
+  title: Почему такой резерв
+  messages:
+    - role: user
+      text: Покажи резерв по OBI
+    - role: user
+      text: Почему такой резерв?
+  expect:
+    intent: reserve_explanation
+    tool: get_reserve_explanation
+
+- id: reserve_below
+  title: SKU ниже резерва
+  messages:
+    - role: user
+      text: Покажи SKU ниже резерва
+  expect:
+    intent: diy_coverage_check
+
+- id: reserve_shortage_goods
+  title: Товары в зоне дефицита
+  messages:
+    - role: user
+      text: Какие товары в зоне дефицита?
+  expect:
+    intent: analytics_slice
+
+- id: reserve_recalculate
+  title: Пересчёт резерва
+  messages:
+    - role: user
+      text: Пересчитай резерв по OBI
+  expect:
+    intent: reserve_calculation
+    tool: calculate_reserve
+    creates: [reserve_run]
+
+- id: reserve_three_months_read
+  title: Резерв на 3 месяца read-only
+  messages:
+    - role: user
+      text: Покажи резерв по OBI на 3 месяца
+  expect:
+    intent: reserve_calculation
+    tool: get_reserve
+    must_not_create: [reserve_run]
+
+- id: reserve_critical_positions
+  title: Только critical позиции
+  messages:
+    - role: user
+      text: Покажи только critical позиции
+  expect:
+    intent: stock_risk_summary
+
+- id: reserve_coverage_less_two
+  title: Покрытие меньше 2 месяцев
+  messages:
+    - role: user
+      text: Покажи товары с покрытием меньше 2 месяцев
+  expect:
+    intent: stock_risk_summary
+
+- id: stock_shortage
+  title: Где не хватает остатков
+  messages:
+    - role: user
+      text: Где не хватает остатков?
+  expect:
+    intent: analytics_slice
+    tool: get_analytics_slice
+
+- id: stock_risky_sku
+  title: SKU в зоне риска
+  messages:
+    - role: user
+      text: Какие SKU в зоне риска?
+  expect:
+    intent: stock_risk_summary
+    tool: get_stock_coverage
+
+- id: inbound_arrived
+  title: Что пришло на склад
+  messages:
+    - role: user
+      text: Что пришло на склад?
+  expect:
+    intent: analytics_slice
+
+- id: inbound_closes_shortage
+  title: Поставки закрывают дефицит
+  messages:
+    - role: user
+      text: Какие поставки закроют дефицит?
+  expect:
+    intent: inbound_impact
+    tool: get_inbound_impact
+
+- id: stock_by_obi
+  title: Остатки по OBI
+  messages:
+    - role: user
+      text: Покажи остатки по OBI
+  expect:
+    intent: analytics_slice
+
+- id: stock_zero_free
+  title: Товары без свободного остатка
+  messages:
+    - role: user
+      text: Покажи товары без свободного остатка
+  expect:
+    intent: analytics_slice
+
+- id: management_report_2025
+  title: Управленческий отчёт за 2025
+  messages:
+    - role: user
+      text: Покажи управленческий отчёт за 2025
+  expect:
+    intent: management_report_summary
+    tool: get_management_report
+
+- id: management_best_group
+  title: Самая выгодная товарная группа
+  messages:
+    - role: user
+      text: Какая товарная группа самая выгодная?
+  expect:
+    intent: management_report_summary
+    tool: get_management_report
+
+- id: management_profitability
+  title: Высокая рентабельность
+  messages:
+    - role: user
+      text: Где самая высокая рентабельность?
+  expect:
+    intent: management_report_summary
+
+- id: management_departments_revenue
+  title: Подразделения по выручке
+  messages:
+    - role: user
+      text: Сравни подразделения по выручке
+  expect:
+    intent: management_report_summary
+
+- id: management_pdz
+  title: ПДЗ
+  messages:
+    - role: user
+      text: Что известно по ПДЗ?
+  expect:
+    intent: management_report_summary
+
+- id: management_margin_drop
+  title: Просела маржа
+  messages:
+    - role: user
+      text: Где просела маржа?
+  expect:
+    intent: management_report_summary
+
+- id: clarify_sales
+  title: Уточнение продаж
+  messages:
+    - role: user
+      text: Покажи продажи
+  expect:
+    intent: analytics_slice
+    type: clarification
+    missing_fields: [period]
+    pending_intent: analytics_slice
+
+- id: clarify_compare
+  title: Уточнение сравнения
+  messages:
+    - role: user
+      text: Сравни с прошлым месяцем
+  expect:
+    intent: period_comparison
+    type: clarification
+    missing_fields: [metric]
+
+- id: show_reserve_portfolio
+  title: Показать резерв без клиента read-only
+  messages:
+    - role: user
+      text: Покажи резерв
+  expect:
+    intent: reserve_calculation
+    tool: get_reserve
+    must_not_create: [reserve_run]
+
+- id: ambiguous_client
+  title: Что с OBI
+  messages:
+    - role: user
+      text: Что с OBI?
+  expect:
+    intent: unsupported_or_ambiguous
+    status: unsupported
+
+- id: ambiguous_problematic
+  title: Проблемные без контекста
+  messages:
+    - role: user
+      text: Покажи проблемные
+  expect:
+    status: unsupported
+
+- id: no_data_period
+  title: Период без данных
+  messages:
+    - role: user
+      text: Покажи продажи по OBI за 2099 год
+  expect:
+    intent: analytics_slice
+    tool: get_analytics_slice
+    status: partial
+
+- id: nonexistent_sku
+  title: Несуществующий SKU
+  messages:
+    - role: user
+      text: Покажи продажи по SKU NO-SUCH-SKU за март 2025
+  expect:
+    intent: analytics_slice
+    must_not_include: [42 млн]
+
+- id: nonexistent_client
+  title: Несуществующий клиент
+  messages:
+    - role: user
+      text: Покажи продажи по клиенту Ромашка за март 2025
+  expect:
+    intent: analytics_slice
+    must_not_include: [42 млн]
+
+- id: unsupported_dimension
+  title: Unsupported dimension
+  messages:
+    - role: user
+      text: Покажи остатки по клиентам за 2025
+  expect:
+    intent: analytics_slice
+    status: needs_clarification
+
+- id: out_of_scope
+  title: Вопрос вне MAGAMAX
+  messages:
+    - role: user
+      text: Напиши стихотворение про море
+  expect:
+    intent: unsupported_or_ambiguous
+    status: unsupported
+    must_not_include: [море синее]
+
+- id: data_overview
+  title: Что полезного есть в БД
+  messages:
+    - role: user
+      text: Покажи всё полезное, что есть в БД
+  expect:
+    intent: data_overview
+    tool: get_data_overview
+    source_refs: true
+    must_not_create: [reserve_run]
+
+- id: stock_free_metric
+  title: Свободный остаток
+  messages:
+    - role: user
+      text: Покажи свободный остаток по SKU
+  expect:
+    intent: analytics_slice
+    tool: get_analytics_slice
+    tool_args:
+      metrics: [free_stock]

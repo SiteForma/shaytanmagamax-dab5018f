@@ -116,6 +116,7 @@ def seed_reference_data(db: Session, settings: Settings) -> None:
 
     for resource in ("dashboard", "catalog", "clients", "stock", "inbound", "sales", "quality", "reports"):
         ensure_policy("analyst", resource, "read")
+    ensure_policy("analyst", "inbound", "sync")
     ensure_policy("analyst", "reserve", "read")
     ensure_policy("analyst", "reserve", "run")
     ensure_policy("analyst", "uploads", "read")
@@ -124,15 +125,18 @@ def seed_reference_data(db: Session, settings: Settings) -> None:
     ensure_policy("analyst", "mapping", "read")
     ensure_policy("analyst", "mapping", "write")
     ensure_policy("analyst", "assistant", "query")
+    ensure_policy("analyst", "assistant", "internal_analytics")
     ensure_policy("analyst", "exports", "generate")
     ensure_policy("analyst", "exports", "download")
 
     for resource in ("dashboard", "catalog", "clients", "stock", "inbound", "quality", "reports"):
         ensure_policy("operator", resource, "read")
+    ensure_policy("operator", "inbound", "sync")
     ensure_policy("operator", "uploads", "read")
     ensure_policy("operator", "uploads", "write")
     ensure_policy("operator", "uploads", "apply")
     ensure_policy("operator", "mapping", "read")
+    ensure_policy("operator", "assistant", "internal_analytics")
     ensure_policy("operator", "mapping", "write")
     ensure_policy("operator", "reserve", "read")
     ensure_policy("operator", "reserve", "run")
@@ -376,6 +380,14 @@ def seed_reference_data(db: Session, settings: Settings) -> None:
             "sku_5": [45, 42, 49, 55, 58, 64],
         },
     }
+    sku_prices = {
+        "sku_1": 1250,
+        "sku_2": 840,
+        "sku_3": 640,
+        "sku_4": 420,
+        "sku_5": 310,
+        "sku_6": 980,
+    }
     for client_id, sku_values in sales_matrix.items():
         for sku_id, quantities in sku_values.items():
             for months_ago, quantity in enumerate(reversed(quantities)):
@@ -387,8 +399,32 @@ def seed_reference_data(db: Session, settings: Settings) -> None:
                         category_id=sku_category_ids[sku_id],
                         period_month=period,
                         quantity=quantity,
+                        revenue_amount=quantity * sku_prices[sku_id],
                     )
                 )
+    historical_2025_sales = [
+        ("client_1", "sku_1", date(2025, 3, 1), 260, 1250),
+        ("client_1", "sku_2", date(2025, 3, 1), 155, 840),
+        ("client_1", "sku_6", date(2025, 3, 1), 88, 980),
+        ("client_3", "sku_2", date(2025, 3, 1), 118, 840),
+        ("client_3", "sku_4", date(2025, 3, 1), 74, 420),
+        ("client_3", "sku_5", date(2025, 3, 1), 39, 310),
+        ("client_1", "sku_1", date(2025, 2, 1), 240, 1250),
+        ("client_3", "sku_2", date(2025, 2, 1), 104, 840),
+        ("client_1", "sku_1", date(2025, 1, 1), 220, 1250),
+        ("client_3", "sku_2", date(2025, 1, 1), 98, 840),
+    ]
+    for client_id, sku_id, period, quantity, price in historical_2025_sales:
+        db.add(
+            SalesFact(
+                client_id=client_id,
+                sku_id=sku_id,
+                category_id=sku_category_ids[sku_id],
+                period_month=period,
+                quantity=quantity,
+                revenue_amount=quantity * price,
+            )
+        )
 
     stock_rows = [
         ("sku_1", "Щёлково", 280, 40),
@@ -489,7 +525,7 @@ def seed_reference_data(db: Session, settings: Settings) -> None:
         )
         db.add(file)
     db.flush()
-    for batch_id, source_type, status, file_name, total_rows, issue_count in upload_batches:
+    for batch_id, _source_type, _status, _file_name, _total_rows, issue_count in upload_batches:
         batch = db.get(UploadBatch, batch_id)
         file = db.get(UploadFile, f"file_{batch_id}")
         if batch is None or file is None:

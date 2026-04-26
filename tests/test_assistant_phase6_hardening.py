@@ -50,8 +50,9 @@ def _enable_llm(test_settings) -> None:
 def test_registry_specs_are_first_class_and_permissioned() -> None:
     registry = get_default_tool_registry()
 
-    assert registry.default_plan_for_intent("reserve_calculation")[0] == "calculate_reserve"
+    assert registry.default_plan_for_intent("reserve_calculation")[0] == "get_reserve"
     assert "get_reserve" in registry.tools_for_intent("reserve_calculation")
+    assert "calculate_reserve" in registry.tools_for_intent("reserve_calculation")
     assert all(spec.handler is not None for spec in registry.specs)
     assert all(spec.required_capabilities for spec in registry.specs)
 
@@ -140,7 +141,7 @@ def test_completed_answer_trace_metadata_has_source_ref_count(client: TestClient
     assert response.status_code == 200
     payload = response.json()
     assert payload["traceMetadata"]["resolved_intent"] == "reserve_calculation"
-    assert payload["traceMetadata"]["resolved_tool"] == "calculate_reserve"
+    assert payload["traceMetadata"]["resolved_tool"] == "get_reserve"
     assert payload["traceMetadata"]["source_refs_count"] == len(payload["sourceRefs"])
     assert payload["traceMetadata"]["source_refs_count"] > 0
 
@@ -160,9 +161,9 @@ def test_new_topic_does_not_inherit_previous_reserve_filters(client: TestClient)
 
     assert second.status_code == 200
     payload = second.json()["response"]
-    assert payload["intent"] == "sales_summary"
-    sales_tool = next(tool for tool in payload["toolCalls"] if tool["toolName"] == "get_sales_summary")
-    assert sales_tool["arguments"]["client_id"] is None
+    assert payload["intent"] == "analytics_slice"
+    sales_tool = next(tool for tool in payload["toolCalls"] if tool["toolName"] == "get_analytics_slice")
+    assert sales_tool["arguments"].get("client_id") is None
 
 
 def test_problematic_followup_preserves_previous_intent_and_filters(client: TestClient) -> None:

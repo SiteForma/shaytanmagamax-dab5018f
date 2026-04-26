@@ -23,6 +23,7 @@ describe("OverviewPage", () => {
           totalReserveShortage: 9420,
           inboundWithinHorizon: 4300,
           avgCoverageMonths: 1.8,
+          assistantApiCostRub: 12,
           lastUpdate: "2026-04-23T10:00:00Z",
           freshnessHours: 2,
           openQualityIssues: 4,
@@ -67,6 +68,8 @@ describe("OverviewPage", () => {
     renderWithProviders(<OverviewPage />);
 
     expect(screen.getByText("128")).toBeInTheDocument();
+    expect(screen.getByText("ChatGPT API")).toBeInTheDocument();
+    expect(screen.getByText("12 руб.")).toBeInTheDocument();
     expect(screen.getByText("Направляющая")).toBeInTheDocument();
     expect(screen.getByText("Леман Про")).toBeInTheDocument();
   });

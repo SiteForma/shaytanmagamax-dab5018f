@@ -1,23 +1,32 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
-import re
 from typing import Any
 
 from sqlalchemy.orm import Session
 
 from apps.api.app.core.errors import DomainError
+from apps.api.app.modules.assistant.analytics_catalog import (
+    METRIC_CATALOG,
+    capabilities_for_slice,
+    normalize_dimension_name,
+    normalize_metric_name,
+)
 from apps.api.app.modules.assistant.domain import AssistantContextBundle, AssistantToolExecution
 from apps.api.app.modules.assistant.state import AssistantMissingField
 from apps.api.app.modules.assistant.tools import (
     tool_calculate_reserve,
+    tool_get_analytics_slice,
     tool_get_client_summary,
     tool_get_dashboard_summary,
+    tool_get_data_overview,
     tool_get_inbound_impact,
     tool_get_management_report,
     tool_get_period_comparison,
     tool_get_quality_issues,
+    tool_get_reserve,
     tool_get_sales_summary,
     tool_get_sku_summary,
     tool_get_stock_risk,
@@ -29,9 +38,29 @@ AssistantToolHandler = Callable[
     [Session, AssistantContextBundle, dict[str, Any], str | None],
     AssistantToolExecution,
 ]
+AssistantCapabilityResolver = Callable[[dict[str, Any]], tuple[tuple[str, str], ...]]
 
 SQL_LIKE_PATTERN = re.compile(
     r"(?is)\b(select|insert|update|delete|drop|alter|truncate|create|grant|revoke)\b|--|/\*|\*/|;",
+)
+ALLOWED_FILTER_FIELDS = frozenset(
+    {
+        "client_id",
+        "client_name",
+        "sku_id",
+        "sku_ids",
+        "sku_codes",
+        "category_id",
+        "category_name",
+        "warehouse",
+        "region",
+        "status",
+        "risk",
+        "date_from",
+        "date_to",
+        "year",
+        "month",
+    }
 )
 
 
@@ -44,13 +73,21 @@ class AssistantToolSpec:
     optional_fields: tuple[str, ...]
     required_capabilities: tuple[tuple[str, str], ...]
     handler: AssistantToolHandler
+    capability_resolver: AssistantCapabilityResolver | None = None
 
     @property
     def allowed_fields(self) -> set[str]:
         return {*self.required_fields, *self.optional_fields}
 
+    def capabilities_for(self, params: dict[str, Any]) -> tuple[tuple[str, str], ...]:
+        if self.capability_resolver is None:
+            return self.required_capabilities
+        return self.capability_resolver(params)
+
     def validate(self, params: dict[str, Any]) -> list[AssistantMissingField]:
-        unknown = sorted(set(params) - self.allowed_fields - {"_followup_intent", "_pending_intent"})
+        unknown = sorted(
+            set(params) - self.allowed_fields - {"_followup_intent", "_pending_intent", "_force_tool"}
+        )
         if unknown:
             raise DomainError(
                 code="assistant_unknown_tool_param",
@@ -58,6 +95,16 @@ class AssistantToolSpec:
                 details={"tool": self.name, "unknown_params": unknown},
                 status_code=400,
             )
+        filters = params.get("filters")
+        if isinstance(filters, dict):
+            unknown_filters = sorted(set(filters) - ALLOWED_FILTER_FIELDS)
+            if unknown_filters:
+                raise DomainError(
+                    code="assistant_unknown_tool_filter",
+                    message="Planner вернул фильтры, которых нет в контракте assistant tool.",
+                    details={"tool": self.name, "unknown_filters": unknown_filters},
+                    status_code=400,
+                )
         sql_like_path = _find_sql_like_param(params)
         if sql_like_path:
             raise DomainError(
@@ -71,6 +118,19 @@ class AssistantToolSpec:
             value = params.get(field_name)
             if value is None or value == "" or value == []:
                 missing.append(_missing_field(field_name, self.intent, params))
+        if self.name == "get_analytics_slice":
+            raw_metrics = params.get("metrics") or params.get("metric") or []
+            if isinstance(raw_metrics, str):
+                metrics = [normalize_metric_name(raw_metrics)]
+            elif isinstance(raw_metrics, list):
+                metrics = [normalize_metric_name(str(item)) for item in raw_metrics]
+            else:
+                metrics = []
+            sources = {METRIC_CATALOG[metric].source for metric in metrics if metric in METRIC_CATALOG}
+            needs_period = bool(sources.intersection({"sales", "inbound", "management_report"}))
+            has_period = bool(params.get("period")) or bool(params.get("date_from") and params.get("date_to"))
+            if needs_period and not has_period and all(item.name != "period" for item in missing):
+                missing.append(_missing_field("period", self.intent, params))
         return missing
 
 
@@ -135,7 +195,7 @@ class AssistantToolRegistry:
 
 
 DEFAULT_INTENT_TOOL_PLAN: dict[str, tuple[str, ...]] = {
-    "reserve_calculation": ("calculate_reserve", "get_quality_issues", "get_upload_status"),
+    "reserve_calculation": ("get_reserve", "get_quality_issues", "get_upload_status"),
     "reserve_explanation": ("get_reserve_explanation", "get_sku_summary", "get_quality_issues"),
     "sku_summary": ("get_sku_summary", "get_quality_issues"),
     "client_summary": ("get_client_summary", "get_dashboard_summary"),
@@ -147,6 +207,8 @@ DEFAULT_INTENT_TOOL_PLAN: dict[str, tuple[str, ...]] = {
     "management_report_summary": ("get_management_report",),
     "sales_summary": ("get_sales_summary",),
     "period_comparison": ("get_period_comparison",),
+    "analytics_slice": ("get_analytics_slice",),
+    "data_overview": ("get_data_overview",),
 }
 
 
@@ -159,6 +221,7 @@ def _missing_field(field_name: str, intent: str, params: dict[str, Any]) -> Assi
         "metric": "метрика",
         "current_period": "текущий период",
         "previous_period": "период сравнения",
+        "period": "период",
         "question": "вопрос",
     }
     questions = {
@@ -169,6 +232,7 @@ def _missing_field(field_name: str, intent: str, params: dict[str, Any]) -> Assi
         "metric": "Что именно сравнить: продажи, остатки или резерв?",
         "current_period": "Какой период взять как текущий?",
         "previous_period": "С каким периодом сравнить?",
+        "period": "За какой период собрать аналитический срез?",
         "question": "Что именно нужно найти в управленческом отчёте?",
     }
     if intent == "reserve_calculation" and field_name == "client_id":
@@ -205,6 +269,15 @@ def _reserve_handler(
     created_by_id: str | None,
 ) -> AssistantToolExecution:
     return tool_calculate_reserve(db, _apply_params(bundle, params), created_by_id=created_by_id)
+
+
+def _reserve_read_handler(
+    db: Session,
+    bundle: AssistantContextBundle,
+    params: dict[str, Any],
+    _created_by_id: str | None,
+) -> AssistantToolExecution:
+    return tool_get_reserve(db, _apply_params(bundle, params), params)
 
 
 def _reserve_explanation_handler(
@@ -306,6 +379,44 @@ def _period_comparison_handler(
     return tool_get_period_comparison(db, _apply_params(bundle, params), params)
 
 
+def _analytics_slice_handler(
+    db: Session,
+    bundle: AssistantContextBundle,
+    params: dict[str, Any],
+    _created_by_id: str | None,
+) -> AssistantToolExecution:
+    return tool_get_analytics_slice(db, _apply_params(bundle, params), params)
+
+
+def _data_overview_handler(
+    db: Session,
+    _bundle: AssistantContextBundle,
+    _params: dict[str, Any],
+    _created_by_id: str | None,
+) -> AssistantToolExecution:
+    return tool_get_data_overview(db)
+
+
+def _analytics_required_capabilities(params: dict[str, Any]) -> tuple[tuple[str, str], ...]:
+    raw_metrics = params.get("metrics") or params.get("metric") or []
+    if isinstance(raw_metrics, str):
+        metrics = [normalize_metric_name(raw_metrics)]
+    elif isinstance(raw_metrics, list):
+        metrics = [normalize_metric_name(str(item)) for item in raw_metrics]
+    else:
+        metrics = []
+    if not metrics:
+        metrics = ["revenue"]
+    raw_dimensions = params.get("dimensions") or params.get("dimension") or []
+    if isinstance(raw_dimensions, str):
+        dimensions = [normalize_dimension_name(raw_dimensions)]
+    elif isinstance(raw_dimensions, list):
+        dimensions = [normalize_dimension_name(str(item)) for item in raw_dimensions]
+    else:
+        dimensions = []
+    return capabilities_for_slice(metrics, dimensions)
+
+
 def get_default_tool_registry() -> AssistantToolRegistry:
     registry = AssistantToolRegistry()
     common_reserve_fields = (
@@ -318,6 +429,9 @@ def get_default_tool_registry() -> AssistantToolRegistry:
         "reserve_months",
         "safety_factor",
         "reserve_run_id",
+        "status",
+        "risk",
+        "filters",
     )
     registry.register(
         AssistantToolSpec(
@@ -334,11 +448,11 @@ def get_default_tool_registry() -> AssistantToolRegistry:
         AssistantToolSpec(
             name="get_reserve",
             intent="reserve_calculation",
-            description="Alias for reserve calculation.",
-            required_fields=("client_id",),
-            optional_fields=common_reserve_fields,
-            required_capabilities=(("reserve", "read"), ("reserve", "run")),
-            handler=_reserve_handler,
+            description="Read-only чтение последнего сохранённого reserve run без скрытого пересчёта.",
+            required_fields=(),
+            optional_fields=(*common_reserve_fields, "status", "risk", "filters"),
+            required_capabilities=(("reserve", "read"),),
+            handler=_reserve_read_handler,
         )
     )
     registry.register(
@@ -369,7 +483,7 @@ def get_default_tool_registry() -> AssistantToolRegistry:
             intent="stock_risk_summary",
             description="Список SKU с низким покрытием склада.",
             required_fields=(),
-            optional_fields=("category_id", "sku_id", "client_id"),
+            optional_fields=("category_id", "sku_id", "client_id", "status", "risk", "filters", "reserve_months"),
             required_capabilities=(("stock", "read"),),
             handler=_stock_handler,
         )
@@ -457,7 +571,7 @@ def get_default_tool_registry() -> AssistantToolRegistry:
             intent="sales_summary",
             description="Сводка продаж по периоду, клиенту и SKU.",
             required_fields=("date_from", "date_to"),
-            optional_fields=("date_from", "date_to", "client_id", "client_name", "sku_id", "sku_ids"),
+            optional_fields=("date_from", "date_to", "client_id", "client_name", "sku_id", "sku_ids", "metric"),
             required_capabilities=(("sales", "read"),),
             handler=_sales_summary_handler,
         )
@@ -479,6 +593,58 @@ def get_default_tool_registry() -> AssistantToolRegistry:
             ),
             required_capabilities=(("sales", "read"),),
             handler=_period_comparison_handler,
+        )
+    )
+    registry.register(
+        AssistantToolSpec(
+            name="get_analytics_slice",
+            intent="analytics_slice",
+            description="Read-only универсальный аналитический срез через allowlisted metrics/dimensions.",
+            required_fields=("metrics",),
+            optional_fields=(
+                "metric",
+                "metrics",
+                "dimension",
+                "dimensions",
+                "filters",
+                "period",
+                "date_from",
+                "date_to",
+                "sort",
+                "sort_by",
+                "sort_direction",
+                "limit",
+                "client_id",
+                "client_name",
+                "sku_id",
+                "sku_ids",
+                "category_id",
+            ),
+            required_capabilities=(("sales", "read"),),
+            handler=_analytics_slice_handler,
+            capability_resolver=_analytics_required_capabilities,
+        )
+    )
+    registry.register(
+        AssistantToolSpec(
+            name="get_data_overview",
+            intent="data_overview",
+            description="Read-only инвентаризация полезных аналитических данных в БД без скрытых расчётов.",
+            required_fields=(),
+            optional_fields=(),
+            required_capabilities=(
+                ("dashboard", "read"),
+                ("catalog", "read"),
+                ("clients", "read"),
+                ("uploads", "read"),
+                ("sales", "read"),
+                ("stock", "read"),
+                ("reserve", "read"),
+                ("inbound", "read"),
+                ("quality", "read"),
+                ("reports", "read"),
+            ),
+            handler=_data_overview_handler,
         )
     )
     return registry

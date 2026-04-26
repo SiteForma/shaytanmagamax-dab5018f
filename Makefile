@@ -2,7 +2,7 @@ PYTHON := ./.venv/bin/python
 PIP := ./.venv/bin/pip
 DRAMATIQ := ./.venv/bin/dramatiq
 
-.PHONY: venv install api web worker test lint migrate seed migrate-staging seed-staging api-staging worker-staging compose-up compose-down
+.PHONY: venv install api web worker inbound-scheduler test lint migrate seed migrate-staging seed-staging api-staging worker-staging compose-up compose-down
 
 venv:
 	python3 -m venv .venv
@@ -19,6 +19,9 @@ web:
 
 worker:
 	$(DRAMATIQ) apps.worker.worker_app.tasks
+
+inbound-scheduler:
+	$(PYTHON) -m apps.worker.worker_app.scheduler
 
 test:
 	$(PYTHON) -m pytest

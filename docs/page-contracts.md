@@ -81,13 +81,17 @@ UI contract:
 Источник:
 
 - `GET /api/inbound/timeline`
+- `POST /api/inbound/sync` for manual Google Sheet refresh
 
 UI uses:
 
 - статус
 - ETA
 - affected clients
-- reserve impact
+- container ref
+- in-transit qty
+- free stock after allocation
+- customer order qty
 
 ## Upload Center
 

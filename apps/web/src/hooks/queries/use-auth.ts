@@ -1,5 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { getCurrentUser, getCurrentSession, login, logout } from "@/services/auth.service";
+import {
+  getCurrentUser,
+  getCurrentSession,
+  login,
+  logout,
+  updateCurrentUserProfile,
+  type UpdateCurrentUserPayload,
+} from "@/services/auth.service";
 import { DEV_USER_ID } from "@/lib/auth/config";
 import { hasCapability, type Capability } from "@/lib/access";
 import { queryKeys } from "@/lib/query/keys";
@@ -26,6 +33,16 @@ export function useLoginMutation() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: login,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.auth.all });
+    },
+  });
+}
+
+export function useUpdateCurrentUserProfileMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: UpdateCurrentUserPayload) => updateCurrentUserProfile(payload),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.auth.all });
     },

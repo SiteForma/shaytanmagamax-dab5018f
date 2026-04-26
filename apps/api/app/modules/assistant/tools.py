@@ -1,14 +1,39 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from datetime import date, datetime
 from decimal import Decimal
 from time import perf_counter
+from types import SimpleNamespace
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from apps.api.app.db.models import Client, SalesFact, Sku
+from apps.api.app.db.models import (
+    Category,
+    Client,
+    InboundDelivery,
+    ManagementReportImport,
+    ManagementReportMetric,
+    QualityIssue,
+    ReserveRow,
+    ReserveRun,
+    SalesFact,
+    Sku,
+    StockSnapshot,
+    UploadBatch,
+)
+from apps.api.app.modules.assistant.analytics_catalog import (
+    DIMENSION_CATALOG,
+    METRIC_CATALOG,
+    metric_source,
+    normalize_dimension_name,
+    normalize_metric_name,
+    unsupported_dimensions,
+    unsupported_dimensions_for_metrics,
+    unsupported_metrics,
+)
 from apps.api.app.modules.assistant.domain import (
     AssistantContextBundle,
     AssistantToolExecution,
@@ -23,6 +48,7 @@ from apps.api.app.modules.clients.service import (
 from apps.api.app.modules.dashboard.service import get_dashboard_overview
 from apps.api.app.modules.inbound.service import get_inbound_timeline
 from apps.api.app.modules.quality.service import list_quality_issues
+from apps.api.app.modules.reports.service import get_management_report_assistant_context
 from apps.api.app.modules.reserve.domain import ReserveCalculationInput
 from apps.api.app.modules.reserve.schemas import ReserveRowResponse
 from apps.api.app.modules.reserve.service import (
@@ -31,9 +57,13 @@ from apps.api.app.modules.reserve.service import (
     get_run_detail,
     get_run_rows,
 )
-from apps.api.app.modules.reports.service import get_management_report_assistant_context
 from apps.api.app.modules.stock.service import get_stock_coverage
 from apps.api.app.modules.uploads.service import get_upload_file_detail, list_upload_files
+
+logger = logging.getLogger(__name__)
+
+ANALYTICS_METRIC_CATALOG = METRIC_CATALOG
+ANALYTICS_DIMENSION_CATALOG = {key: spec.label for key, spec in DIMENSION_CATALOG.items()}
 
 
 def _status_label(value: str) -> str:
@@ -65,17 +95,21 @@ def _measure_tool(
             warnings=warnings,
             source_refs=source_refs,
         )
-    except Exception as exc:  # pragma: no cover - defensive for operational fallback
+    except Exception:  # pragma: no cover - defensive for operational fallback
+        logger.exception(
+            "Assistant tool failed",
+            extra={"assistant_tool": name, "argument_keys": sorted(arguments.keys())},
+        )
         return AssistantToolExecution(
             tool_name=name,
             status="failed",
             arguments=arguments,
-            summary=str(exc),
+            summary=f"Инструмент {name} временно недоступен. Детали сохранены в backend logs.",
             latency_ms=max(int((perf_counter() - started) * 1000), 1),
             warnings=[
                 AssistantWarningData(
                     code=f"{name}_failed",
-                    message=f"Инструмент {name} завершился ошибкой: {exc}",
+                    message=f"Инструмент {name} завершился ошибкой. Передайте traceId администратору.",
                     severity="error",
                 )
             ],
@@ -118,19 +152,19 @@ def _parse_date(value: object) -> date | None:
     if len(text) == 7:
         text = f"{text}-01"
     try:
-        return datetime.fromisoformat(text).date().replace(day=1)
+        return datetime.fromisoformat(text).date()
     except ValueError:
         return None
 
 
 def _period_bounds(value: object) -> tuple[date | None, date | None]:
+    if isinstance(value, str) and len(value.strip()) == 4 and value.strip().isdigit():
+        year = int(value.strip())
+        return date(year, 1, 1), date(year + 1, 1, 1)
     start = _parse_date(value)
     if start is None:
         return None, None
-    if start.month == 12:
-        end = date(start.year + 1, 1, 1)
-    else:
-        end = date(start.year, start.month + 1, 1)
+    end = date(start.year + 1, 1, 1) if start.month == 12 else date(start.year, start.month + 1, 1)
     return start, end
 
 
@@ -163,6 +197,140 @@ def tool_calculate_reserve(
             safety_factor=bundle.route.safety_factor,
             created_by_id=created_by_id,
         ),
+    )
+
+
+def tool_get_reserve(
+    db: Session,
+    bundle: AssistantContextBundle,
+    params: dict[str, object] | None = None,
+) -> AssistantToolExecution:
+    params = params or {}
+    client_id = bundle.context.selected_client_id
+    sku_ids = list(bundle.route.extracted_sku_ids)
+    if bundle.context.selected_sku_id and bundle.context.selected_sku_id not in sku_ids:
+        sku_ids.append(bundle.context.selected_sku_id)
+    problematic_only = str(params.get("status") or params.get("risk") or "").lower() in {
+        "problematic",
+        "problematic_only",
+        "at_risk",
+        "critical",
+        "warning",
+    }
+    return _measure_tool(
+        "get_reserve",
+        {
+            "client_id": client_id,
+            "sku_ids": sku_ids,
+            "category_id": bundle.context.selected_category_id,
+            "status": "problematic" if problematic_only else None,
+        },
+        lambda: _get_reserve_payload(
+            db,
+            client_id=client_id,
+            sku_ids=sku_ids,
+            category_id=bundle.context.selected_category_id,
+            problematic_only=problematic_only,
+        ),
+    )
+
+
+def _filter_reserve_rows(
+    db: Session,
+    rows: list[ReserveRowResponse],
+    *,
+    client_id: str | None,
+    sku_ids: list[str],
+    category_id: str | None,
+    problematic_only: bool,
+) -> list[ReserveRowResponse]:
+    filtered = rows
+    if client_id:
+        filtered = [row for row in filtered if row.client_id == client_id]
+    if sku_ids:
+        selected = set(sku_ids)
+        filtered = [row for row in filtered if row.sku_id in selected]
+    if category_id:
+        sku_ids_for_category = set(
+            db.scalars(select(Sku.id).where(Sku.category_id == category_id)).all()
+        )
+        filtered = [row for row in filtered if row.sku_id in sku_ids_for_category]
+    if problematic_only:
+        filtered = [row for row in filtered if row.status in {"critical", "warning", "no_history"}]
+    return sorted(filtered, key=lambda row: (row.shortage_qty, row.target_reserve_qty), reverse=True)
+
+
+def _get_reserve_payload(
+    db: Session,
+    *,
+    client_id: str | None,
+    sku_ids: list[str],
+    category_id: str | None,
+    problematic_only: bool,
+) -> tuple[object, str, list[dict[str, object]], list[AssistantWarningData]]:
+    run, rows = get_portfolio_rows(db)
+    if run is None:
+        return (
+            None,
+            "Сохранённый portfolio reserve run не найден",
+            [],
+            [
+                AssistantWarningData(
+                    code="reserve_run_missing",
+                    message="Нет сохранённого расчёта резерва. Для пересчёта запросите «пересчитай резерв».",
+                    severity="warning",
+                )
+            ],
+        )
+    filtered = _filter_reserve_rows(
+        db,
+        rows,
+        client_id=client_id,
+        sku_ids=sku_ids,
+        category_id=category_id,
+        problematic_only=problematic_only,
+    )
+    detail = get_run_detail(db, run.id)
+    run_summary = detail.run if detail is not None else None
+    if run_summary is None:
+        return (
+            None,
+            "Сводка reserve run недоступна",
+            [],
+            [
+                AssistantWarningData(
+                    code="reserve_run_summary_missing",
+                    message="Сохранённый reserve run найден, но его сводка недоступна.",
+                    severity="warning",
+                )
+            ],
+        )
+    refs = [
+        _source_ref(
+            source_type="reserve_engine",
+            source_label=f"Сохранённый резерв {run.id}",
+            entity_type="reserve_run",
+            entity_id=run.id,
+            freshness_at=run.created_at.isoformat() if hasattr(run.created_at, "isoformat") else str(run.created_at),
+            role="primary",
+            route=f"/reserve?run={run.id}",
+            detail=f"{len(filtered)} строк после фильтров, новых расчётов не запускалось",
+        )
+    ]
+    warnings = []
+    if not filtered:
+        warnings.append(
+            AssistantWarningData(
+                code="reserve_no_rows",
+                message="По выбранным фильтрам сохранённых строк резерва не найдено.",
+                severity="warning",
+            )
+        )
+    return (
+        SimpleNamespace(run=run_summary, rows=filtered),
+        f"Прочитан сохранённый reserve run {run.id}: {len(filtered)} строк",
+        refs,
+        warnings,
     )
 
 
@@ -264,23 +432,6 @@ def _reserve_explanation_payload(
     else:
         reserve_run, rows = get_portfolio_rows(db)
         run = get_run_detail(db, reserve_run.id) if reserve_run else None
-        if not rows and bundle.context.selected_client_id and bundle.context.selected_sku_id:
-            calculated = calculate_and_persist(
-                db,
-                ReserveCalculationInput(
-                    client_ids=[bundle.context.selected_client_id],
-                    sku_ids=[bundle.context.selected_sku_id],
-                    demand_strategy="weighted_recent_average",
-                    include_inbound=True,
-                    inbound_statuses_to_count=["confirmed"],
-                    persist_run=True,
-                    horizon_days=60,
-                ),
-                created_by_id=None,
-                reuse_existing=True,
-            )
-            rows = calculated.rows
-            run = get_run_detail(db, calculated.run.id)
     if not rows:
         return (
             None,
@@ -636,6 +787,208 @@ def _dashboard_payload(
     return overview, "Получена dashboard summary", refs, []
 
 
+def tool_get_data_overview(db: Session) -> AssistantToolExecution:
+    return _measure_tool(
+        "get_data_overview",
+        {},
+        lambda: _data_overview_payload(db),
+    )
+
+
+def _count_rows(db: Session, model: type[object]) -> int:
+    return int(db.scalar(select(func.count()).select_from(model)) or 0)
+
+
+def _data_overview_payload(
+    db: Session,
+) -> tuple[object, str, list[dict[str, object]], list[AssistantWarningData]]:
+    active_clients = int(db.scalar(select(func.count()).select_from(Client).where(Client.is_active.is_(True))) or 0)
+    active_skus = int(db.scalar(select(func.count()).select_from(Sku).where(Sku.active.is_(True))) or 0)
+    category_count = _count_rows(db, Category)
+
+    sales_count, sales_qty, sales_revenue, sales_min, sales_max = db.execute(
+        select(
+            func.count(SalesFact.id),
+            func.coalesce(func.sum(SalesFact.quantity), 0),
+            func.coalesce(func.sum(SalesFact.revenue_amount), 0),
+            func.min(SalesFact.period_month),
+            func.max(SalesFact.period_month),
+        )
+    ).one()
+
+    stock_count, free_stock, latest_stock_at = db.execute(
+        select(
+            func.count(StockSnapshot.id),
+            func.coalesce(func.sum(StockSnapshot.free_stock_qty), 0),
+            func.max(StockSnapshot.snapshot_at),
+        )
+    ).one()
+
+    inbound_count, inbound_qty, next_eta = db.execute(
+        select(
+            func.count(InboundDelivery.id),
+            func.coalesce(func.sum(InboundDelivery.quantity), 0),
+            func.min(InboundDelivery.eta_date),
+        )
+    ).one()
+
+    reserve_run_count = _count_rows(db, ReserveRun)
+    latest_run = db.scalars(select(ReserveRun).order_by(ReserveRun.created_at.desc()).limit(1)).first()
+    reserve_rows_count = _count_rows(db, ReserveRow)
+    latest_reserve_shortage = 0.0
+    latest_reserve_rows = 0
+    if latest_run is not None:
+        latest_reserve_rows, latest_reserve_shortage = db.execute(
+            select(
+                func.count(ReserveRow.id),
+                func.coalesce(func.sum(ReserveRow.shortage_qty), 0),
+            ).where(ReserveRow.run_id == latest_run.id)
+        ).one()
+
+    upload_count = _count_rows(db, UploadBatch)
+    latest_upload = db.scalars(select(UploadBatch).order_by(UploadBatch.created_at.desc()).limit(1)).first()
+    upload_statuses = {
+        status: int(count)
+        for status, count in db.execute(
+            select(UploadBatch.status, func.count(UploadBatch.id)).group_by(UploadBatch.status)
+        ).all()
+    }
+
+    open_quality_count = int(
+        db.scalar(select(func.count()).select_from(QualityIssue).where(QualityIssue.status == "open")) or 0
+    )
+    quality_by_severity = {
+        severity: int(count)
+        for severity, count in db.execute(
+            select(QualityIssue.severity, func.count(QualityIssue.id))
+            .where(QualityIssue.status == "open")
+            .group_by(QualityIssue.severity)
+        ).all()
+    }
+
+    latest_report = db.scalars(
+        select(ManagementReportImport).order_by(ManagementReportImport.created_at.desc()).limit(1)
+    ).first()
+    report_metric_count = _count_rows(db, ManagementReportMetric)
+
+    sections = [
+        {
+            "key": "catalog",
+            "label": "Справочники",
+            "route": "/sku",
+            "count": active_clients + active_skus + category_count,
+            "freshnessAt": None,
+            "summary": f"{active_clients} активных клиентов, {active_skus} активных SKU, {category_count} категорий.",
+        },
+        {
+            "key": "sales",
+            "label": "Продажи",
+            "route": "/stock",
+            "count": int(sales_count or 0),
+            "freshnessAt": sales_max.isoformat() if sales_max else None,
+            "summary": (
+                f"{int(sales_count or 0)} строк, период "
+                f"{sales_min.isoformat() if sales_min else 'н/д'} — {sales_max.isoformat() if sales_max else 'н/д'}, "
+                f"{float(sales_qty or 0):.1f} шт., {float(sales_revenue or 0):.2f} ₽."
+            ),
+        },
+        {
+            "key": "stock",
+            "label": "Склад",
+            "route": "/stock",
+            "count": int(stock_count or 0),
+            "freshnessAt": latest_stock_at.isoformat() if latest_stock_at else None,
+            "summary": f"{int(stock_count or 0)} snapshots, свободный остаток {float(free_stock or 0):.1f} шт.",
+        },
+        {
+            "key": "reserve",
+            "label": "Резерв",
+            "route": "/reserve",
+            "count": int(reserve_rows_count or 0),
+            "freshnessAt": latest_run.created_at.isoformat() if latest_run else None,
+            "summary": (
+                f"{reserve_run_count} reserve runs, {int(latest_reserve_rows or 0)} строк в последнем run, "
+                f"дефицит последнего run {float(latest_reserve_shortage or 0):.1f} шт."
+            ),
+        },
+        {
+            "key": "inbound",
+            "label": "Поставки",
+            "route": "/inbound",
+            "count": int(inbound_count or 0),
+            "freshnessAt": next_eta.isoformat() if next_eta else None,
+            "summary": f"{int(inbound_count or 0)} поставок, суммарно {float(inbound_qty or 0):.1f} шт.",
+        },
+        {
+            "key": "uploads",
+            "label": "Загрузки",
+            "route": "/uploads",
+            "count": int(upload_count or 0),
+            "freshnessAt": latest_upload.created_at.isoformat() if latest_upload else None,
+            "summary": f"{upload_count} batches, статусы: {upload_statuses or {}}.",
+        },
+        {
+            "key": "quality",
+            "label": "Качество данных",
+            "route": "/quality",
+            "count": open_quality_count,
+            "freshnessAt": None,
+            "summary": f"{open_quality_count} открытых issues, severity: {quality_by_severity or {}}.",
+        },
+        {
+            "key": "management_report",
+            "label": "Управленческий отчёт",
+            "route": "/reports/management/summary",
+            "count": int(report_metric_count or 0),
+            "freshnessAt": latest_report.created_at.isoformat() if latest_report else None,
+            "summary": (
+                f"{latest_report.file_name}: {latest_report.raw_row_count} raw-строк, "
+                f"{latest_report.metric_count} метрик."
+                if latest_report
+                else "Импортированный управленческий отчёт не найден."
+            ),
+        },
+    ]
+    populated_sections = [section for section in sections if int(section["count"] or 0) > 0]
+    refs = [
+        _source_ref(
+            source_type=str(section["key"]),
+            source_label=str(section["label"]),
+            entity_type="data_overview",
+            freshness_at=str(section["freshnessAt"]) if section.get("freshnessAt") else None,
+            role="primary" if section["key"] in {"sales", "reserve", "management_report"} else "supporting",
+            route=str(section["route"]),
+            detail=str(section["summary"]),
+        )
+        for section in populated_sections
+    ]
+    warnings = []
+    if not populated_sections:
+        warnings.append(
+            AssistantWarningData(
+                code="data_overview_empty",
+                message="В БД не найдено наполненных аналитических источников.",
+                severity="warning",
+            )
+        )
+    return (
+        {
+            "status": "completed" if populated_sections else "no_data",
+            "sections": sections,
+            "available_sections": [str(section["key"]) for section in populated_sections],
+            "principles": [
+                "read_only",
+                "no_hidden_calculation",
+                "source_refs_required",
+                "no_synthetic_numbers",
+            ],
+        },
+        f"Проверено {len(sections)} read-only источников, наполнено {len(populated_sections)}.",
+        refs,
+        warnings,
+    )
+
+
 def tool_get_management_report(db: Session, question: str) -> AssistantToolExecution:
     return _measure_tool(
         "get_management_report",
@@ -870,3 +1223,470 @@ def _period_comparison_payload(
             )
         )
     return payload, "Сравнение периодов по продажам собрано", refs, warnings
+
+
+def tool_get_analytics_slice(
+    db: Session,
+    bundle: AssistantContextBundle,
+    params: dict[str, object],
+) -> AssistantToolExecution:
+    return _measure_tool(
+        "get_analytics_slice",
+        {
+            "metrics": params.get("metrics") or params.get("metric"),
+            "dimensions": params.get("dimensions") or params.get("dimension"),
+            "filters": params.get("filters"),
+            "period": params.get("period"),
+            "date_from": params.get("date_from"),
+            "date_to": params.get("date_to"),
+            "client_id": params.get("client_id") or bundle.context.selected_client_id,
+            "sku_id": params.get("sku_id") or bundle.context.selected_sku_id,
+            "category_id": params.get("category_id") or bundle.context.selected_category_id,
+            "sort_by": params.get("sort_by"),
+            "sort_direction": params.get("sort_direction"),
+            "limit": params.get("limit"),
+        },
+        lambda: _analytics_slice_payload(db, bundle, params),
+    )
+
+
+def _string_list(value: object) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, list):
+        return [str(item) for item in value if str(item).strip()]
+    return [str(value)]
+
+
+def _normalize_metric_name(value: str) -> str:
+    return normalize_metric_name(value)
+
+
+def _normalize_dimension_name(value: str) -> str:
+    return normalize_dimension_name(value)
+
+
+def _period_filter(params: dict[str, object]) -> tuple[date | None, date | None]:
+    period = params.get("period")
+    if isinstance(period, dict):
+        date_from = period.get("date_from") or period.get("from")
+        date_to = period.get("date_to") or period.get("to")
+    else:
+        date_from = params.get("date_from")
+        date_to = params.get("date_to")
+    return _parse_date(date_from), _parse_date(date_to)
+
+
+def _filter_value(params: dict[str, object], key: str) -> object | None:
+    filters = params.get("filters")
+    if isinstance(filters, dict) and filters.get(key) is not None:
+        return filters.get(key)
+    return params.get(key)
+
+
+def _group_key(values: dict[str, object], dimensions: list[str]) -> tuple[object, ...]:
+    return tuple(values.get(dimension) for dimension in dimensions)
+
+
+def _row_from_group(dimensions: list[str], key: tuple[object, ...], metrics: dict[str, float]) -> dict[str, object]:
+    row = {dimension: value for dimension, value in zip(dimensions, key, strict=False)}
+    row.update({name: round(value, 4) for name, value in metrics.items()})
+    return row
+
+
+def _quarter_for_month(month: int) -> str:
+    return f"Q{((month - 1) // 3) + 1}"
+
+
+def _analytics_slice_payload(
+    db: Session,
+    bundle: AssistantContextBundle,
+    params: dict[str, object],
+) -> tuple[object, str, list[dict[str, object]], list[AssistantWarningData]]:
+    metrics = [_normalize_metric_name(item) for item in _string_list(params.get("metrics") or params.get("metric"))]
+    dimensions = [
+        _normalize_dimension_name(item)
+        for item in _string_list(params.get("dimensions") or params.get("dimension"))
+    ]
+    if not metrics:
+        metrics = ["revenue"]
+    if not dimensions:
+        dimensions = ["client"]
+
+    unknown_metrics = unsupported_metrics(metrics)
+    unknown_dimensions = unsupported_dimensions(dimensions)
+    unsupported_for_source = (
+        unsupported_dimensions_for_metrics(metrics, dimensions)
+        if not unknown_metrics and not unknown_dimensions
+        else []
+    )
+    if unknown_metrics or unknown_dimensions or unsupported_for_source:
+        return (
+            {
+                "status": "unsupported",
+                "unsupported_metrics": unknown_metrics,
+                "unsupported_dimensions": unknown_dimensions + unsupported_for_source,
+                "supported_metrics": sorted(ANALYTICS_METRIC_CATALOG),
+                "supported_dimensions": sorted(ANALYTICS_DIMENSION_CATALOG),
+                "metric_catalog": {
+                    key: {"label": spec.label, "unit": spec.unit, "source": spec.source}
+                    for key, spec in METRIC_CATALOG.items()
+                },
+                "dimension_catalog": {
+                    key: {"label": spec.label, "source": spec.source}
+                    for key, spec in DIMENSION_CATALOG.items()
+                },
+            },
+            "Запрошенный аналитический срез пока не поддерживается",
+            [],
+            [
+                AssistantWarningData(
+                    code="analytics_slice_unsupported",
+                    message="Срез не поддерживается. В ответе перечислены доступные метрики и измерения.",
+                    severity="warning",
+                )
+            ],
+        )
+
+    source = metric_source(metrics)
+    if source is None:
+        return (
+            {
+                "status": "unsupported",
+                "supported_metrics": sorted(ANALYTICS_METRIC_CATALOG),
+                "supported_dimensions": sorted(ANALYTICS_DIMENSION_CATALOG),
+                "reason": "cross_source_slice_not_supported",
+            },
+            "Срез из нескольких источников пока нужно запрашивать отдельными вопросами",
+            [],
+            [
+                AssistantWarningData(
+                    code="cross_source_slice_not_supported",
+                    message="Пока поддерживаются срезы внутри одного источника: sales, stock, reserve, inbound или management report.",
+                    severity="warning",
+                )
+            ],
+        )
+
+    limit = max(min(int(params.get("limit") or 20), 100), 1)
+    if source == "sales":
+        rows = _analytics_sales_rows(db, bundle, params, metrics, dimensions, limit)
+        source_ref = _source_ref(
+            source_type="sales",
+            source_label="Sales facts",
+            entity_type="sales_fact",
+            role="primary",
+            route="/sales",
+            detail=f"{len(rows)} агрегированных строк",
+        )
+    elif source == "stock":
+        rows = _analytics_stock_rows(db, bundle, params, metrics, dimensions, limit)
+        source_ref = _source_ref(
+            source_type="stock_snapshot",
+            source_label="Stock snapshots",
+            entity_type="stock_snapshot",
+            role="primary",
+            route="/stock",
+            detail=f"{len(rows)} агрегированных строк",
+        )
+    elif source == "reserve":
+        rows = _analytics_reserve_rows(db, bundle, params, metrics, dimensions, limit)
+        source_ref = _source_ref(
+            source_type="reserve_engine",
+            source_label="Сохранённые reserve rows",
+            entity_type="reserve_row",
+            role="primary",
+            route="/reserve",
+            detail=f"{len(rows)} агрегированных строк",
+        )
+    elif source == "inbound":
+        rows = _analytics_inbound_rows(db, bundle, params, metrics, dimensions, limit)
+        source_ref = _source_ref(
+            source_type="inbound",
+            source_label="Inbound deliveries",
+            entity_type="inbound_delivery",
+            role="primary",
+            route="/inbound",
+            detail=f"{len(rows)} агрегированных строк",
+        )
+    else:
+        rows = _analytics_management_report_rows(db, params, metrics, dimensions, limit)
+        source_ref = _source_ref(
+            source_type="management_report",
+            source_label="Управленческий отчёт",
+            entity_type="management_report_metric",
+            role="primary",
+            route="/reports/management/summary",
+            detail=f"{len(rows)} агрегированных строк",
+        )
+
+    sort_by = str(params.get("sort_by") or (metrics[0] if metrics else "")).strip()
+    sort_direction = str(params.get("sort_direction") or "desc").lower()
+    if sort_by:
+        rows = sorted(
+            rows,
+            key=lambda row: float(row.get(sort_by) or 0),
+            reverse=sort_direction != "asc",
+        )[:limit]
+
+    totals = {
+        metric: round(sum(float(row.get(metric) or 0) for row in rows), 4)
+        for metric in metrics
+    }
+    status = "completed" if rows else "no_data"
+    warnings = []
+    if not rows:
+        warnings.append(
+            AssistantWarningData(
+                code="analytics_slice_no_data",
+                message="По выбранным метрикам, измерениям и фильтрам данных не найдено.",
+                severity="warning",
+            )
+        )
+    return (
+        {
+            "status": status,
+            "source": source,
+            "metrics": metrics,
+            "dimensions": dimensions,
+            "rows": rows,
+            "totals": totals,
+            "date_from": _period_filter(params)[0].isoformat() if _period_filter(params)[0] else None,
+            "date_to": _period_filter(params)[1].isoformat() if _period_filter(params)[1] else None,
+            "sort_by": sort_by or None,
+            "sort_direction": sort_direction,
+            "limit": limit,
+            "query_description": (
+                f"{source}: {', '.join(metrics)}"
+                f"{' по ' + ', '.join(dimensions) if dimensions else ''}"
+            ),
+            "supported_metrics": sorted(ANALYTICS_METRIC_CATALOG),
+            "supported_dimensions": sorted(ANALYTICS_DIMENSION_CATALOG),
+            "sourceRefs": [source_ref],
+        },
+        f"Аналитический срез {source}: {len(rows)} строк",
+        [source_ref],
+        warnings,
+    )
+
+
+def _analytics_sales_rows(
+    db: Session,
+    bundle: AssistantContextBundle,
+    params: dict[str, object],
+    metrics: list[str],
+    dimensions: list[str],
+    limit: int,
+) -> list[dict[str, object]]:
+    date_from, date_to = _period_filter(params)
+    statement = select(SalesFact)
+    if date_from:
+        statement = statement.where(SalesFact.period_month >= date_from)
+    if date_to:
+        statement = statement.where(SalesFact.period_month <= date_to)
+    client_id = str(_filter_value(params, "client_id") or bundle.context.selected_client_id or "") or None
+    sku_id = str(_filter_value(params, "sku_id") or bundle.context.selected_sku_id or "") or None
+    category_id = str(_filter_value(params, "category_id") or bundle.context.selected_category_id or "") or None
+    if client_id:
+        statement = statement.where(SalesFact.client_id == client_id)
+    if sku_id:
+        statement = statement.where(SalesFact.sku_id == sku_id)
+    if category_id:
+        statement = statement.where(SalesFact.category_id == category_id)
+    facts = db.scalars(statement).all()
+    client_cache = {item.id: item for item in db.scalars(select(Client)).all()}
+    sku_cache = {item.id: item for item in db.scalars(select(Sku)).all()}
+    category_cache = {item.id: item for item in db.scalars(select(Category)).all()}
+    grouped: dict[tuple[object, ...], dict[str, float]] = {}
+    for fact in facts:
+        sku = sku_cache.get(fact.sku_id)
+        category = category_cache.get(fact.category_id or (sku.category_id if sku else ""))
+        client = client_cache.get(fact.client_id)
+        values = {
+            "client": client.name if client else fact.client_id,
+            "region": client.region if client else None,
+            "sku": sku.name if sku else fact.sku_id,
+            "article": sku.article if sku else fact.sku_id,
+            "category": category.name if category else None,
+            "month": fact.period_month.strftime("%Y-%m"),
+            "quarter": f"{fact.period_month.year}-{_quarter_for_month(fact.period_month.month)}",
+            "year": fact.period_month.year,
+        }
+        item = grouped.setdefault(_group_key(values, dimensions), {metric: 0.0 for metric in metrics})
+        if "sales_qty" in item:
+            item["sales_qty"] += float(fact.quantity or 0)
+        if "revenue" in item:
+            item["revenue"] += float(fact.revenue_amount or 0)
+    return _sorted_metric_rows(dimensions, grouped, metrics, limit)
+
+
+def _analytics_stock_rows(
+    db: Session,
+    bundle: AssistantContextBundle,
+    params: dict[str, object],
+    metrics: list[str],
+    dimensions: list[str],
+    limit: int,
+) -> list[dict[str, object]]:
+    snapshots = db.scalars(select(StockSnapshot)).all()
+    latest: dict[str, StockSnapshot] = {}
+    for snapshot in snapshots:
+        current = latest.get(snapshot.sku_id)
+        if current is None or snapshot.snapshot_at > current.snapshot_at:
+            latest[snapshot.sku_id] = snapshot
+    sku_cache = {item.id: item for item in db.scalars(select(Sku)).all()}
+    category_cache = {item.id: item for item in db.scalars(select(Category)).all()}
+    selected_sku_id = str(_filter_value(params, "sku_id") or bundle.context.selected_sku_id or "") or None
+    selected_category_id = str(_filter_value(params, "category_id") or bundle.context.selected_category_id or "") or None
+    grouped: dict[tuple[object, ...], dict[str, float]] = {}
+    for snapshot in latest.values():
+        sku = sku_cache.get(snapshot.sku_id)
+        if selected_sku_id and snapshot.sku_id != selected_sku_id:
+            continue
+        if selected_category_id and (not sku or sku.category_id != selected_category_id):
+            continue
+        category = category_cache.get(sku.category_id) if sku and sku.category_id else None
+        values = {
+            "sku": sku.name if sku else snapshot.sku_id,
+            "article": sku.article if sku else snapshot.sku_id,
+            "category": category.name if category else None,
+            "warehouse": snapshot.warehouse_code,
+            "month": snapshot.snapshot_at.strftime("%Y-%m"),
+            "quarter": f"{snapshot.snapshot_at.year}-{_quarter_for_month(snapshot.snapshot_at.month)}",
+            "year": snapshot.snapshot_at.year,
+        }
+        item = grouped.setdefault(_group_key(values, dimensions), {metric: 0.0 for metric in metrics})
+        if "stock_qty" in item:
+            item["stock_qty"] += float(snapshot.free_stock_qty or 0) + float(snapshot.reserved_like_qty or 0)
+        if "free_stock" in item:
+            item["free_stock"] += float(snapshot.free_stock_qty or 0)
+    return _sorted_metric_rows(dimensions, grouped, metrics, limit)
+
+
+def _analytics_reserve_rows(
+    db: Session,
+    bundle: AssistantContextBundle,
+    params: dict[str, object],
+    metrics: list[str],
+    dimensions: list[str],
+    limit: int,
+) -> list[dict[str, object]]:
+    _, reserve_rows = get_portfolio_rows(db)
+    client_id = str(_filter_value(params, "client_id") or bundle.context.selected_client_id or "") or None
+    sku_id = str(_filter_value(params, "sku_id") or bundle.context.selected_sku_id or "") or None
+    grouped: dict[tuple[object, ...], dict[str, float]] = {}
+    for row in reserve_rows:
+        if client_id and row.client_id != client_id:
+            continue
+        if sku_id and row.sku_id != sku_id:
+            continue
+        values = {
+            "client": row.client_name,
+            "sku": row.product_name,
+            "article": row.article,
+            "category": row.category,
+        }
+        item = grouped.setdefault(_group_key(values, dimensions), {metric: 0.0 for metric in metrics})
+        if "reserve_qty" in item:
+            item["reserve_qty"] += float(row.target_reserve_qty or 0)
+        if "shortage_qty" in item:
+            item["shortage_qty"] += float(row.shortage_qty or 0)
+        if "coverage_months" in item:
+            item["coverage_months"] = max(float(row.coverage_months or 0), item["coverage_months"])
+    return _sorted_metric_rows(dimensions, grouped, metrics, limit)
+
+
+def _analytics_inbound_rows(
+    db: Session,
+    bundle: AssistantContextBundle,
+    params: dict[str, object],
+    metrics: list[str],
+    dimensions: list[str],
+    limit: int,
+) -> list[dict[str, object]]:
+    date_from, date_to = _period_filter(params)
+    deliveries = db.scalars(select(InboundDelivery)).all()
+    sku_cache = {item.id: item for item in db.scalars(select(Sku)).all()}
+    category_cache = {item.id: item for item in db.scalars(select(Category)).all()}
+    selected_sku_id = str(_filter_value(params, "sku_id") or bundle.context.selected_sku_id or "") or None
+    grouped: dict[tuple[object, ...], dict[str, float]] = {}
+    for delivery in deliveries:
+        if date_from and delivery.eta_date < date_from:
+            continue
+        if date_to and delivery.eta_date > date_to:
+            continue
+        if selected_sku_id and delivery.sku_id != selected_sku_id:
+            continue
+        sku = sku_cache.get(delivery.sku_id)
+        category = category_cache.get(sku.category_id) if sku and sku.category_id else None
+        values = {
+            "sku": sku.name if sku else delivery.sku_id,
+            "article": sku.article if sku else delivery.sku_id,
+            "category": category.name if category else None,
+            "month": delivery.eta_date.strftime("%Y-%m"),
+            "quarter": f"{delivery.eta_date.year}-{_quarter_for_month(delivery.eta_date.month)}",
+            "year": delivery.eta_date.year,
+        }
+        item = grouped.setdefault(_group_key(values, dimensions), {metric: 0.0 for metric in metrics})
+        if "inbound_qty" in item:
+            item["inbound_qty"] += float(delivery.quantity or 0)
+    return _sorted_metric_rows(dimensions, grouped, metrics, limit)
+
+
+def _analytics_management_report_rows(
+    db: Session,
+    params: dict[str, object],
+    metrics: list[str],
+    dimensions: list[str],
+    limit: int,
+) -> list[dict[str, object]]:
+    metric_names = {"profitability": "profitability_pct", "margin": "profitability_pct"}
+    wanted_metric_names = [metric_names[item] for item in metrics if item in metric_names]
+    if not wanted_metric_names:
+        return []
+    statement = select(ManagementReportMetric).where(
+        ManagementReportMetric.metric_name.in_(wanted_metric_names)
+    )
+    period = params.get("period")
+    year = None
+    if isinstance(period, dict):
+        date_from = str(period.get("date_from") or "")
+        if len(date_from) >= 4 and date_from[:4].isdigit():
+            year = int(date_from[:4])
+    if year is not None:
+        statement = statement.where(ManagementReportMetric.metric_year == year)
+    rows = db.scalars(statement).all()
+    grouped: dict[tuple[object, ...], dict[str, float]] = {}
+    counts: dict[tuple[object, ...], int] = {}
+    for metric in rows:
+        values = {
+            "product_group": metric.dimension_name,
+            "year": metric.metric_year,
+            "category": metric.dimension_name,
+        }
+        key = _group_key(values, dimensions)
+        item = grouped.setdefault(key, {requested: 0.0 for requested in metrics})
+        counts[key] = counts.get(key, 0) + 1
+        for requested in metrics:
+            item[requested] += float(metric.metric_value or 0)
+    for key, item in grouped.items():
+        count = counts.get(key, 1) or 1
+        for metric in item:
+            item[metric] = item[metric] / count
+    return _sorted_metric_rows(dimensions, grouped, metrics, limit)
+
+
+def _sorted_metric_rows(
+    dimensions: list[str],
+    grouped: dict[tuple[object, ...], dict[str, float]],
+    metrics: list[str],
+    limit: int,
+) -> list[dict[str, object]]:
+    primary_metric = metrics[0]
+    rows = [
+        _row_from_group(dimensions, key, metric_values)
+        for key, metric_values in grouped.items()
+    ]
+    return sorted(rows, key=lambda row: float(row.get(primary_metric) or 0), reverse=True)[:limit]

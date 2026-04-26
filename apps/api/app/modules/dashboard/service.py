@@ -7,7 +7,13 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from apps.api.app.common.utils import utc_now
-from apps.api.app.db.models import Client, InboundDelivery, QualityIssue, UploadBatch
+from apps.api.app.db.models import (
+    AssistantMessage,
+    Client,
+    InboundDelivery,
+    QualityIssue,
+    UploadBatch,
+)
 from apps.api.app.modules.dashboard.schemas import (
     DashboardOverviewResponse,
     DashboardSummaryResponse,
@@ -34,6 +40,20 @@ def _as_utc(value: datetime) -> datetime:
     if value.tzinfo is None:
         return value.replace(tzinfo=UTC)
     return value.astimezone(UTC)
+
+
+def _assistant_api_cost_rub(db: Session) -> float:
+    cost_rub = 0.0
+    messages = db.scalars(
+        select(AssistantMessage).where(AssistantMessage.role == "assistant")
+    ).all()
+    for message in messages:
+        response = message.response_payload or {}
+        usage = response.get("tokenUsage") if isinstance(response, dict) else None
+        if not isinstance(usage, dict):
+            continue
+        cost_rub += float(usage.get("estimatedCostRub") or usage.get("estimated_cost_rub") or 0)
+    return round(cost_rub, 4)
 
 
 def get_dashboard_overview(db: Session) -> DashboardOverviewResponse:
@@ -67,6 +87,7 @@ def get_dashboard_overview(db: Session) -> DashboardOverviewResponse:
         total_shortage_qty=float(totals["total_shortage_qty"]),
         inbound_qty_within_horizon=round(sum(item["inbound_qty"] for item in inbound_vs_shortage), 1),
         avg_coverage_months=totals["avg_coverage_months"],  # type: ignore[arg-type]
+        assistant_api_cost_rub=_assistant_api_cost_rub(db),
         open_quality_issues=open_quality_issues,
         last_update=latest_timestamp.isoformat(),
         freshness_hours=freshness_hours,

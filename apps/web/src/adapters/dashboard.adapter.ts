@@ -33,6 +33,7 @@ export function dashboardOverviewApiToViewModel(response: any): DashboardOvervie
       totalReserveShortage: response.summary.total_shortage_qty,
       inboundWithinHorizon: response.summary.inbound_qty_within_horizon,
       avgCoverageMonths: response.summary.avg_coverage_months ?? 0,
+      assistantApiCostRub: response.summary.assistant_api_cost_rub ?? 0,
       lastUpdate: response.summary.last_update,
       freshnessHours: response.summary.freshness_hours,
       openQualityIssues: response.summary.open_quality_issues,

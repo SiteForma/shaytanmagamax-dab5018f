@@ -369,11 +369,19 @@ class InboundDelivery(TimestampMixin, Base):
     )
     external_ref: Mapped[str] = mapped_column(String(255), unique=True)
     sku_id: Mapped[str] = mapped_column(ForeignKey("skus.id"), index=True)
+    container_ref: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
     quantity: Mapped[float] = mapped_column(Float)
+    free_stock_after_allocation_qty: Mapped[float] = mapped_column(Float, default=0)
+    client_order_qty: Mapped[float] = mapped_column(Float, default=0)
     eta_date: Mapped[date] = mapped_column(Date, index=True)
     status: Mapped[str] = mapped_column(String(64), index=True)
+    sheet_status: Mapped[str | None] = mapped_column(String(120), nullable=True)
     affected_client_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
     reserve_impact_qty: Mapped[float] = mapped_column(Float, default=0)
+    client_allocations: Mapped[dict[str, object]] = mapped_column(
+        MutableDict.as_mutable(JSON), default=dict
+    )
+    raw_payload: Mapped[dict[str, object]] = mapped_column(MutableDict.as_mutable(JSON), default=dict)
 
 
 class ReserveRun(TimestampMixin, Base):

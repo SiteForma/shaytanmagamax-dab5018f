@@ -15,6 +15,7 @@ def test_registry_registers_standard_phase6_tools() -> None:
     assert registry.lookup("get_management_report").required_capabilities == (("reports", "read"),)
     assert registry.lookup("get_sales_summary").required_capabilities == (("sales", "read"),)
     assert registry.lookup("get_period_comparison").intent == "period_comparison"
+    assert registry.lookup("get_data_overview").intent == "data_overview"
 
 
 def test_registry_rejects_unknown_tool_and_unknown_params() -> None:
@@ -42,7 +43,9 @@ def test_registry_rejects_sql_like_values_even_in_allowed_params() -> None:
 def test_registry_returns_required_missing_fields() -> None:
     registry = get_default_tool_registry()
 
-    missing = registry.validate("get_reserve", {})
+    assert registry.validate("get_reserve", {}) == []
+
+    missing = registry.validate("calculate_reserve", {})
 
     assert [field.name for field in missing] == ["client_id"]
     assert "клиент" in missing[0].label

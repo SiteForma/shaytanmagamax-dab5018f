@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
+
+from apps.api.app.db.models import AssistantMessage, AssistantSession
 
 
 def _create_portfolio_reserve_run(client: TestClient) -> str:
@@ -67,6 +70,39 @@ def test_dashboard_summary_endpoint(client: TestClient) -> None:
     payload = response.json()
     assert payload["total_skus_tracked"] >= 6
     assert payload["positions_at_risk"] >= 0
+    assert "assistant_api_cost_rub" in payload
+
+
+def test_dashboard_summary_includes_assistant_api_cost(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    _create_portfolio_reserve_run(client)
+    session = AssistantSession(created_by_id="user_admin", title="Cost check")
+    db_session.add(session)
+    db_session.flush()
+    db_session.add(
+        AssistantMessage(
+            session_id=session.id,
+            created_by_id="user_admin",
+            role="assistant",
+            message_text="answer",
+            response_payload={
+                "tokenUsage": {
+                    "inputTokens": 1000,
+                    "outputTokens": 3000,
+                    "totalTokens": 4000,
+                    "estimatedCostUsd": 0.04,
+                    "estimatedCostRub": 12.0,
+                }
+            },
+        )
+    )
+    db_session.commit()
+
+    response = client.get("/api/dashboard/summary")
+    assert response.status_code == 200
+    assert response.json()["assistant_api_cost_rub"] == 12.0
 
 
 @pytest.mark.parametrize(

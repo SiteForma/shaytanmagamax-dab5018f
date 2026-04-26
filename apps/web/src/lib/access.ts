@@ -6,6 +6,7 @@ export type Capability =
   | "clients:read"
   | "stock:read"
   | "inbound:read"
+  | "inbound:sync"
   | "sales:read"
   | "reserve:read"
   | "reserve:run"

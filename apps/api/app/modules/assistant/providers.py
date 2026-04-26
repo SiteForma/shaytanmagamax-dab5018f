@@ -6,8 +6,8 @@ from typing import Any, Protocol
 
 import httpx
 
-from apps.api.app.core.errors import DomainError
 from apps.api.app.core.config import Settings
+from apps.api.app.core.errors import DomainError
 from apps.api.app.modules.assistant.domain import (
     AssistantAnswerDraft,
     AssistantRoutePlan,
@@ -35,6 +35,8 @@ PLANNABLE_INTENTS: set[str] = {
     "management_report_summary",
     "sales_summary",
     "period_comparison",
+    "analytics_slice",
+    "data_overview",
     "free_chat",
     "unsupported_or_ambiguous",
 }
@@ -440,19 +442,17 @@ def finalize_with_provider(
     if draft.intent == "unsupported_or_ambiguous" or draft.status == "unsupported":
         provider = DeterministicAssistantProvider()
         return provider.finalize(draft), provider.name, [], _empty_usage()
+    if draft.tool_calls or draft.source_refs:
+        provider = DeterministicAssistantProvider()
+        return provider.finalize(draft), provider.name, [], _empty_usage()
     if settings.assistant_provider == "openai_compatible":
         provider = OpenAICompatibleAssistantProvider(settings)
         try:
             finalized, usage = provider.finalize(draft)
             return finalized, provider.name, [], usage
         except AssistantProviderError:
-            warning = AssistantWarningData(
-                code="provider_unavailable",
-                message="LLM-провайдер недоступен, использован детерминированный режим.",
-                severity="warning",
-            )
-            draft.warnings.append(warning)
+            # Provider availability is an operational detail. Do not leak it into
+            # user-facing MAGAMAX answers; deterministic composition is the safe fallback.
+            pass
     provider = DeterministicAssistantProvider()
-    return provider.finalize(draft), provider.name, [
-        warning for warning in draft.warnings if warning.code == "provider_unavailable"
-    ], _empty_usage()
+    return provider.finalize(draft), provider.name, [], _empty_usage()

@@ -11,6 +11,7 @@ class DashboardSummaryResponse(ORMModel):
     total_shortage_qty: float
     inbound_qty_within_horizon: float
     avg_coverage_months: float | None = None
+    assistant_api_cost_rub: float = 0.0
     open_quality_issues: int
     last_update: str
     freshness_hours: int

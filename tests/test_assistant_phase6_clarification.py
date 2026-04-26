@@ -3,29 +3,27 @@ from __future__ import annotations
 import json
 
 from fastapi.testclient import TestClient
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from apps.api.app.db.models import ReserveRun
 from apps.api.app.modules.assistant.providers import plan_route_with_provider
 
 
-def test_show_reserve_without_client_returns_clarification(client: TestClient) -> None:
+def test_show_reserve_without_client_reads_latest_reserve_without_mutation(
+    client: TestClient,
+    db_session: Session,
+) -> None:
+    before = db_session.scalar(select(func.count()).select_from(ReserveRun))
     response = client.post("/api/assistant/query", json={"text": "Покажи резерв"})
+    after = db_session.scalar(select(func.count()).select_from(ReserveRun))
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["type"] == "clarification"
-    assert payload["status"] == "needs_clarification"
-    assert payload["pendingIntent"] == "reserve_calculation"
-    assert [field["name"] for field in payload["missingFields"]] == ["client_id"]
-    assert "клиент" in payload["summary"].lower()
-    assert payload["traceMetadata"] == {
-        "resolved_intent": "reserve_calculation",
-        "resolved_tool": "calculate_reserve",
-        "missing_fields": ["client_id"],
-        "clarification_reason": "required_fields_missing",
-        "permission_denied_tool": None,
-        "source_refs_count": 0,
-    }
+    assert payload["type"] == "answer"
+    assert payload["status"] in {"completed", "partial"}
+    assert payload["traceMetadata"]["resolved_tool"] == "get_reserve"
+    assert before == after
 
 
 def test_show_reserve_for_obi_uses_client_context(client: TestClient) -> None:
@@ -37,7 +35,7 @@ def test_show_reserve_for_obi_uses_client_context(client: TestClient) -> None:
     assert payload["type"] == "answer"
     assert payload["toolCalls"][0]["arguments"]["client_id"] == "client_3"
     assert payload["traceMetadata"]["resolved_intent"] == "reserve_calculation"
-    assert payload["traceMetadata"]["resolved_tool"] == "calculate_reserve"
+    assert payload["traceMetadata"]["resolved_tool"] == "get_reserve"
     assert payload["traceMetadata"]["missing_fields"] == []
 
 
@@ -85,16 +83,16 @@ def test_sales_summary_without_period_returns_clarification(client: TestClient) 
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["intent"] == "sales_summary"
+    assert payload["intent"] == "analytics_slice"
     assert payload["type"] == "clarification"
-    assert {"date_from", "date_to"}.issubset({field["name"] for field in payload["missingFields"]})
+    assert "period" in {field["name"] for field in payload["missingFields"]}
 
 
 def test_short_answer_after_clarification_continues_pending_intent(client: TestClient) -> None:
     session = client.post("/api/assistant/sessions", json={"title": "Clarification"}).json()
     first = client.post(
         f"/api/assistant/sessions/{session['id']}/messages",
-        json={"text": "Покажи резерв"},
+        json={"text": "Пересчитай резерв"},
     )
     assert first.status_code == 200
     assert first.json()["response"]["pendingIntent"] == "reserve_calculation"
@@ -143,10 +141,10 @@ def test_period_comparison_followup_after_sales_keeps_domain_state(client: TestC
     session = client.post("/api/assistant/sessions", json={"title": "Sales comparison"}).json()
     first = client.post(
         f"/api/assistant/sessions/{session['id']}/messages",
-        json={"text": "Что с продажами в 2025?"},
+        json={"text": "Что с продажами за март 2025?"},
     )
     assert first.status_code == 200
-    assert first.json()["response"]["intent"] == "sales_summary"
+    assert first.json()["response"]["intent"] == "analytics_slice"
 
     second = client.post(
         f"/api/assistant/sessions/{session['id']}/messages",
@@ -156,8 +154,10 @@ def test_period_comparison_followup_after_sales_keeps_domain_state(client: TestC
     assert second.status_code == 200
     payload = second.json()["response"]
     assert payload["intent"] == "period_comparison"
-    assert payload["type"] == "clarification"
-    assert "metric" in {field["name"] for field in payload["missingFields"]}
+    assert payload["type"] == "answer"
+    tool = next(tool for tool in payload["toolCalls"] if tool["toolName"] == "get_period_comparison")
+    assert tool["arguments"]["current_period"] == "2025-03"
+    assert tool["arguments"]["previous_period"] == "2025-02"
 
 
 def test_stock_risk_question_uses_stock_tool(client: TestClient) -> None:

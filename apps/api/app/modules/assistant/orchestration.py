@@ -1,16 +1,16 @@
 from __future__ import annotations
 
+import re
 from collections import OrderedDict
-from datetime import date
 
 from sqlalchemy import select
-from sqlalchemy.orm import joinedload
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from apps.api.app.common.utils import generate_id, utc_now
 from apps.api.app.core.config import Settings
 from apps.api.app.core.errors import DomainError
 from apps.api.app.db.models import Category, Client, Sku, User, UserRole
+from apps.api.app.modules.assistant.analytics_catalog import METRIC_CATALOG
 from apps.api.app.modules.assistant.context import build_context_bundle
 from apps.api.app.modules.assistant.domain import (
     AssistantAnswerDraft,
@@ -19,12 +19,13 @@ from apps.api.app.modules.assistant.domain import (
     AssistantToolExecution,
     AssistantWarningData,
 )
+from apps.api.app.modules.assistant.periods import parse_period_text, previous_month_period
+from apps.api.app.modules.assistant.permissions import require_assistant_tool_capabilities
 from apps.api.app.modules.assistant.providers import (
     combine_token_usage,
     finalize_with_provider,
     plan_route_with_provider,
 )
-from apps.api.app.modules.assistant.permissions import require_assistant_tool_capabilities
 from apps.api.app.modules.assistant.registry import AssistantToolSpec, get_default_tool_registry
 from apps.api.app.modules.assistant.routing import route_question
 from apps.api.app.modules.assistant.schemas import (
@@ -159,22 +160,82 @@ def _user_for_tool_check(db: Session, current_user: User | None, created_by_id: 
 
 
 def _period_from_question(question: str) -> dict[str, str]:
-    q = question.lower()
-    if "2025" in q:
-        return {"date_from": "2025-01-01", "date_to": "2025-12-01"}
-    if "2024" in q:
-        return {"date_from": "2024-01-01", "date_to": "2024-12-01"}
-    return {}
+    return parse_period_text(question).as_range_params()
 
 
 def _previous_month(value: str) -> str | None:
-    try:
-        current = date.fromisoformat(value if len(value) > 7 else f"{value}-01")
-    except ValueError:
-        return None
-    if current.month == 1:
-        return f"{current.year - 1}-12"
-    return f"{current.year}-{current.month - 1:02d}"
+    return previous_month_period(value)
+
+
+def _default_year_from_params(params: dict[str, object]) -> int | None:
+    value = str(params.get("date_from") or params.get("current_period") or "")
+    if len(value) >= 4 and value[:4].isdigit():
+        return int(value[:4])
+    period = params.get("period")
+    if isinstance(period, dict):
+        date_from = str(period.get("date_from") or "")
+        if len(date_from) >= 4 and date_from[:4].isdigit():
+            return int(date_from[:4])
+    return None
+
+
+def _metric_from_question(question: str) -> str | None:
+    q = question.lower()
+    if any(token in q for token in ("штук", "шт", "колич", "quantity", "qty")):
+        return "sales_qty"
+    if any(token in q for token in ("выруч", "руб", "revenue", "заработ")):
+        return "revenue"
+    if "свобод" in q and "остат" in q:
+        return "free_stock"
+    if any(token in q for token in ("остат", "склад")):
+        return "stock_qty"
+    if "дефицит" in q:
+        return "shortage_qty"
+    if "покрыт" in q:
+        return "coverage_months"
+    if any(token in q for token in ("постав", "inbound", "пришл", "поступил", "поступл")):
+        return "inbound_qty"
+    if any(token in q for token in ("рентаб", "марж")):
+        return "profitability"
+    return None
+
+
+def _metrics_from_question(question: str) -> list[str]:
+    q = question.lower()
+    if any(token in q for token in ("в штуках", "в шт", "штук", "шт", "колич")):
+        return ["sales_qty"]
+    if any(token in q for token in ("выруч", "руб", "revenue", "заработ")):
+        return ["revenue"]
+    if any(token in q for token in ("продаж", "реализац", "sales")):
+        return ["revenue", "sales_qty"]
+    metric = _metric_from_question(question)
+    return [metric] if metric else []
+
+
+def _dimensions_from_question(question: str) -> list[str]:
+    q = question.lower()
+    dimensions: list[str] = []
+    if "по категор" in q or "категор" in q:
+        dimensions.append("category")
+    if "по клиент" in q or "клиент" in q:
+        dimensions.append("client")
+    if (
+        "по sku" in q
+        or "топ sku" in q
+        or "sku" in q
+        or "хуже всего продав" in q
+        or "товар" in q
+    ):
+        dimensions.extend(["sku", "article"])
+    if "по артик" in q or "артикул" in q:
+        dimensions.append("article")
+    if "по склад" in q or "склад" in q:
+        dimensions.append("warehouse")
+    if "по месяц" in q or "динамик" in q:
+        dimensions.append("month")
+    if "по кварт" in q:
+        dimensions.append("quarter")
+    return list(dict.fromkeys(dimensions))
 
 
 def _params_from_route(
@@ -211,16 +272,70 @@ def _params_from_route(
     if bundle.route.intent == "management_report_summary":
         params.setdefault("question", question)
     if bundle.route.intent == "sales_summary":
-        params.update({key: value for key, value in _period_from_question(question).items() if key not in params})
+        params.pop("metrics", None)
+        params.pop("dimensions", None)
+        params.pop("dimension", None)
+        parsed = parse_period_text(question, default_year=_default_year_from_params(params))
+        params.update({key: value for key, value in parsed.as_range_params().items() if key not in params})
+        metric = _metric_from_question(question)
+        if metric:
+            params.setdefault("metric", metric)
+        else:
+            params.setdefault("metric", "revenue")
     if bundle.route.intent == "period_comparison":
         q = question.lower()
-        if any(token in q for token in ("продаж", "sales", "выруч", "revenue")):
-            params.setdefault("metric", "revenue" if any(token in q for token in ("выруч", "revenue")) else "quantity")
+        metric = _metric_from_question(question)
+        if metric:
+            params.setdefault("metric", "quantity" if metric == "sales_qty" else metric)
+        elif any(token in q for token in ("продаж", "sales")):
+            params.setdefault("metric", "quantity")
+        years = re.findall(r"\b(20\d{2})\b", q)
+        if len(years) >= 2:
+            params.setdefault("current_period", years[0])
+            params.setdefault("previous_period", years[1])
+        parsed = parse_period_text(question, default_year=_default_year_from_params(params))
+        if parsed.current_period and not params.get("current_period"):
+            params["current_period"] = parsed.current_period
+        if parsed.previous_period and ("прошл" in q or not params.get("previous_period")):
+            params.setdefault("previous_period", parsed.previous_period)
         current_period = str(params.get("current_period") or "")
         if "прошл" in q and current_period and not params.get("previous_period"):
             previous = _previous_month(current_period)
             if previous:
                 params["previous_period"] = previous
+    if bundle.route.intent == "analytics_slice":
+        parsed = parse_period_text(question, default_year=_default_year_from_params(params))
+        if not params.get("period") and parsed.date_from and parsed.date_to:
+            params["period"] = {"date_from": parsed.date_from, "date_to": parsed.date_to}
+            params.setdefault("date_from", parsed.date_from)
+            params.setdefault("date_to", parsed.date_to)
+        elif not params.get("period") and params.get("date_from") and params.get("date_to"):
+            params["period"] = {"date_from": params["date_from"], "date_to": params["date_to"]}
+        metrics = _metrics_from_question(question)
+        if metrics:
+            params.setdefault("metrics", metrics)
+        elif not params.get("metrics") and not params.get("metric"):
+            params.setdefault("metrics", ["revenue", "sales_qty"])
+        dimensions = _dimensions_from_question(question)
+        if dimensions:
+            params.setdefault("dimensions", dimensions)
+        elif not params.get("dimensions") and not params.get("dimension"):
+            selected_metrics = [str(item) for item in params.get("metrics", [])] if isinstance(params.get("metrics"), list) else []
+            metric_source = METRIC_CATALOG.get(selected_metrics[0]).source if selected_metrics and selected_metrics[0] in METRIC_CATALOG else "sales"
+            if metric_source == "sales":
+                params.setdefault("dimensions", [] if params.get("client_id") else ["client"])
+            elif metric_source == "stock":
+                params.setdefault("dimensions", ["sku", "article"])
+            elif metric_source == "reserve":
+                params.setdefault("dimensions", ["client", "sku", "article"])
+            elif metric_source == "inbound":
+                params.setdefault("dimensions", ["sku", "article"])
+            else:
+                params.setdefault("dimensions", ["product_group"])
+        if "топ" in question.lower() and not params.get("limit"):
+            params["limit"] = 20
+        if "падени" in question.lower() or "просел" in question.lower():
+            params.setdefault("sort_direction", "asc")
     return {key: value for key, value in params.items() if value not in (None, "", [])}
 
 
@@ -231,6 +346,8 @@ def _clarification_chips(missing_fields: list[AssistantMissingField]) -> list[st
             chips.extend(["Леман Про", "OBI Россия", "Леруа Мерлен"])
         elif field.name == "date_from":
             chips.extend(["2025", "последние 6 месяцев"])
+        elif field.name == "period":
+            chips.extend(["март 2025", "2025 год", "последние 3 месяца"])
         elif field.name == "metric":
             chips.extend(["продажи", "выручка", "резерв"])
     return list(dict.fromkeys(chips))[:6]
@@ -350,6 +467,7 @@ def _dispatch_tool(
         require_assistant_tool_capabilities(
             _user_for_tool_check(db, current_user, created_by_id),
             spec,
+            params,
         )
     except Exception as exc:
         if getattr(exc, "code", None) == "permission_denied":
@@ -485,6 +603,60 @@ def _generic_followups(intent: str, bundle: AssistantContextBundle) -> list[dict
                 "route": "/quality",
             },
         ]
+    if intent == "data_overview":
+        return [
+            {
+                "id": "sales_by_client",
+                "label": "Выручка по клиентам",
+                "prompt": "Покажи выручку по клиентам за 2025 год",
+                "action": "query",
+            },
+            {
+                "id": "reserve_risks",
+                "label": "Проблемный резерв",
+                "prompt": "Покажи проблемные позиции резерва",
+                "action": "query",
+            },
+            {
+                "id": "management_report",
+                "label": "Управленческий отчёт",
+                "prompt": "Что полезного есть в управленческом отчёте 2025?",
+                "action": "query",
+            },
+        ]
+    if intent == "analytics_slice":
+        return [
+            {
+                "id": "by_clients",
+                "label": "А по клиентам?",
+                "prompt": "А по клиентам?",
+                "action": "query",
+            },
+            {
+                "id": "by_categories",
+                "label": "А по категориям?",
+                "prompt": "А по категориям?",
+                "action": "query",
+            },
+            {
+                "id": "qty",
+                "label": "А в штуках?",
+                "prompt": "А в штуках?",
+                "action": "query",
+            },
+            {
+                "id": "compare_previous_month",
+                "label": "Сравнить с прошлым месяцем",
+                "prompt": "Сравни с прошлым месяцем",
+                "action": "query",
+            },
+            {
+                "id": "top_sku",
+                "label": "Показать топ SKU",
+                "prompt": "Покажи топ SKU",
+                "action": "query",
+            },
+        ]
     if intent == "management_report_summary":
         return [
             {
@@ -524,6 +696,30 @@ def _reserve_rows_preview(rows: list[object], limit: int = 5) -> list[dict[str, 
             }
         )
     return preview
+
+
+def _reserve_rows_totals(rows: list[object], fallback: dict[str, object]) -> dict[str, object]:
+    if not rows:
+        return fallback
+    positions = len(rows)
+    at_risk = sum(
+        1
+        for row in rows
+        if getattr(row, "status", "") in {"critical", "warning", "no_history"}
+    )
+    total_shortage = sum(float(getattr(row, "shortage_qty", 0) or 0) for row in rows)
+    coverage_values = [
+        float(getattr(row, "coverage_months", 0) or 0)
+        for row in rows
+        if getattr(row, "coverage_months", None) is not None
+    ]
+    return {
+        **fallback,
+        "positions": positions,
+        "positions_at_risk": at_risk,
+        "total_shortage_qty": total_shortage,
+        "avg_coverage_months": sum(coverage_values) / len(coverage_values) if coverage_values else None,
+    }
 
 
 def _compose_unsupported(bundle: AssistantContextBundle) -> AssistantAnswerDraft:
@@ -633,20 +829,79 @@ def _compose_answer(
     warnings = _collect_warnings(bundle, executions)
     source_refs = _dedupe_source_refs(executions)
 
+    if bundle.route.intent == "data_overview":
+        payload = tool_map["get_data_overview"].payload or {}
+        data_sections = payload.get("sections") if isinstance(payload, dict) else []
+        if not isinstance(data_sections, list):
+            data_sections = []
+        useful_sections = [
+            section
+            for section in data_sections
+            if isinstance(section, dict) and int(section.get("count") or 0) > 0
+        ]
+        narrative = (
+            f"В БД сейчас есть {len(useful_sections)} наполненных аналитических блоков из {len(data_sections)} проверенных. "
+            "Я показываю только read-only факты из БД и не запускаю скрытые расчёты."
+        )
+        sections = [
+            _section(
+                section_type="narrative",
+                title="Что доступно",
+                body=narrative,
+            ),
+            _section(
+                section_type="source_list",
+                title="Полезные источники",
+                rows=[
+                    {
+                        "source": section.get("label"),
+                        "count": section.get("count"),
+                        "freshnessAt": section.get("freshnessAt"),
+                        "summary": section.get("summary"),
+                        "route": section.get("route"),
+                    }
+                    for section in useful_sections
+                ],
+            ),
+        ]
+        if not useful_sections:
+            sections.append(
+                _section(
+                    section_type="warning_block",
+                    title="Данных пока нет",
+                    items=["Наполненных аналитических источников в БД не найдено."],
+                )
+            )
+        return AssistantAnswerDraft(
+            intent="data_overview",
+            status="completed" if useful_sections else "partial",
+            confidence=0.9 if useful_sections else 0.6,
+            title="Что есть в БД",
+            summary=narrative if useful_sections else "В БД не найдено наполненных аналитических источников.",
+            sections=sections,
+            source_refs=source_refs,
+            tool_calls=executions,
+            followups=_generic_followups("data_overview", bundle),
+            warnings=warnings,
+            context_used=bundle.context,
+        )
+
     if bundle.route.intent == "reserve_calculation":
-        calculation = tool_map["calculate_reserve"].payload
+        primary_execution = tool_map.get("calculate_reserve") or tool_map.get("get_reserve")
+        calculation = primary_execution.payload if primary_execution is not None else None
         if calculation is None:
             return AssistantAnswerDraft(
                 intent="reserve_calculation",
-                status="needs_clarification",
-                confidence=0.42,
-                title="Расчёт резерва не выполнен",
-                summary="Для расчёта резерва не хватает определённого клиента или SKU-контекста.",
+                status="partial",
+                confidence=0.5,
+                title="Резерв не найден",
+                summary="Сохранённых строк резерва по выбранному контексту нет.",
                 sections=[
                     _section(
                         section_type="warning_block",
-                        title="Что нужно для расчёта",
-                        items=[warning.message for warning in warnings] or ["Уточните клиента и SKU."],
+                        title="Что известно",
+                        items=[warning.message for warning in warnings]
+                        or ["Для пересчёта попросите: «пересчитай резерв» и укажите клиента/SKU."],
                     )
                 ],
                 source_refs=source_refs,
@@ -655,13 +910,15 @@ def _compose_answer(
                 warnings=warnings,
                 context_used=bundle.context,
             )
-        totals = calculation.run.summary_payload
+        totals = _reserve_rows_totals(calculation.rows, calculation.run.summary_payload)
+        is_recalculation = primary_execution.tool_name == "calculate_reserve" if primary_execution else False
         sections = [
             _section(
                 section_type="narrative",
                 title="Вывод",
                 body=(
-                    f"По текущему расчёту ниже целевого резерва {int(totals.get('positions_at_risk', 0))} позиций, "
+                    f"По {'новому расчёту' if is_recalculation else 'сохранённому расчёту'} ниже целевого резерва "
+                    f"{int(totals.get('positions_at_risk', 0))} позиций, "
                     f"общий дефицит составляет {_qty(totals.get('total_shortage_qty'))} шт."
                 ),
             ),
@@ -707,7 +964,7 @@ def _compose_answer(
             intent="reserve_calculation",
             status="completed" if not warnings else "partial",
             confidence=0.91 if not warnings else 0.78,
-            title="Расчёт резерва выполнен",
+            title="Расчёт резерва выполнен" if is_recalculation else "Сохранённый резерв",
             summary=sections[0]["body"] or "",
             sections=sections,
             source_refs=source_refs,
@@ -1057,6 +1314,100 @@ def _compose_answer(
             source_refs=source_refs,
             tool_calls=executions,
             followups=_generic_followups("sales_summary", bundle),
+            warnings=warnings,
+            context_used=bundle.context,
+        )
+
+    if bundle.route.intent == "analytics_slice":
+        payload = tool_map["get_analytics_slice"].payload or {}
+        rows = payload.get("rows") if isinstance(payload, dict) else []
+        metrics = payload.get("metrics") if isinstance(payload, dict) else []
+        dimensions = payload.get("dimensions") if isinstance(payload, dict) else []
+        if not isinstance(rows, list):
+            rows = []
+        if not isinstance(metrics, list):
+            metrics = []
+        if not isinstance(dimensions, list):
+            dimensions = []
+        totals = payload.get("totals") if isinstance(payload, dict) else {}
+        if not isinstance(totals, dict):
+            totals = {}
+        if isinstance(payload, dict) and payload.get("status") == "unsupported":
+            supported_metrics = ", ".join(payload.get("supported_metrics") or [])
+            supported_dimensions = ", ".join(payload.get("supported_dimensions") or [])
+            sections = [
+                _section(
+                    section_type="warning_block",
+                    title="Срез пока не поддерживается",
+                    items=[
+                        f"Доступные метрики: {supported_metrics}",
+                        f"Доступные измерения: {supported_dimensions}",
+                    ],
+                )
+            ]
+            return AssistantAnswerDraft(
+                intent="analytics_slice",
+                status="needs_clarification",
+                response_type="clarification",
+                confidence=0.58,
+                title="Нужно выбрать поддерживаемый срез",
+                summary="Такой срез пока не поддерживается. Ниже доступны метрики и измерения.",
+                sections=sections,
+                source_refs=source_refs,
+                tool_calls=executions,
+                followups=_generic_followups("analytics_slice", bundle),
+                warnings=warnings,
+                context_used=bundle.context,
+                missing_fields=[],
+                suggested_chips=["выручка по клиентам", "продажи в штуках по категориям", "дефицит по SKU"],
+                pending_intent="analytics_slice",
+            )
+        primary_metric = str(metrics[0]) if metrics else "metric"
+        top_row = rows[0] if rows else {}
+        top_label = " / ".join(str(top_row.get(dimension) or "—") for dimension in dimensions) if top_row else "нет данных"
+        top_value = top_row.get(primary_metric) if isinstance(top_row, dict) else None
+        primary_unit = METRIC_CATALOG.get(primary_metric).unit if primary_metric in METRIC_CATALOG else "qty"
+        metric_cards = [
+            _metric(
+                str(metric),
+                METRIC_CATALOG.get(str(metric)).label if str(metric) in METRIC_CATALOG else str(metric),
+                _metric_value(totals.get(str(metric), top_row.get(str(metric), 0) if isinstance(top_row, dict) else 0), METRIC_CATALOG.get(str(metric)).unit if str(metric) in METRIC_CATALOG else "qty"),
+                "positive" if float(totals.get(str(metric), 0) or 0) else "neutral",
+            )
+            for metric in metrics
+        ]
+        sections = [
+            _section(
+                section_type="narrative",
+                title="Аналитический срез",
+                body=(
+                    f"По срезу {', '.join(map(str, metrics))} × {', '.join(map(str, dimensions))} "
+                    f"получено {len(rows)} строк. Лидер: {top_label} — {_metric_value(top_value or 0, primary_unit)}."
+                    if rows
+                    else "По выбранному срезу данных не найдено."
+                ),
+            ),
+            _section(
+                section_type="metric_summary",
+                title="Итого",
+                metrics=metric_cards,
+            ),
+            _section(
+                section_type="reserve_table_preview",
+                title="Топ строк",
+                rows=rows[:8],
+            ),
+        ]
+        return AssistantAnswerDraft(
+            intent="analytics_slice",
+            status="completed" if rows else "partial",
+            confidence=0.86 if rows else 0.58,
+            title="Аналитический срез",
+            summary=sections[0]["body"] or "",
+            sections=sections,
+            source_refs=source_refs,
+            tool_calls=executions,
+            followups=_generic_followups("analytics_slice", bundle),
             warnings=warnings,
             context_used=bundle.context,
         )
@@ -1442,6 +1793,20 @@ FOLLOWUP_DETAIL_TOKENS = (
 )
 
 FOLLOWUP_CONTEXT_TOKENS = (
+    "а по ",
+    "а для ",
+    "а теперь",
+    "теперь по ",
+    "в штуках",
+    "в шт",
+    "по категориям",
+    "по категории",
+    "по sku",
+    "по артикулам",
+    "прошлый месяц",
+    "прошлым месяц",
+    "только проблем",
+    "проблемные",
     "второе место",
     "второй",
     "вторая",
@@ -1538,6 +1903,8 @@ def _previous_contextual_user_text(history: list[dict[str, object]]) -> str | No
         if item.get("role") != "user":
             continue
         text = str(item.get("text") or "").strip()
+        if text and _is_repair_followup_request(text):
+            continue
         if text and _is_contextual_followup_request(text):
             return text
     return None
@@ -1576,7 +1943,6 @@ def _apply_history_fallback_plan(
         intent = deterministic_intent
         tool_question = question
 
-    previous_user_text = _previous_user_text(history)
     previous_contextual_user_text = _previous_contextual_user_text(history)
     should_repair_previous_followup = (
         _is_repair_followup_request(question)
@@ -1606,9 +1972,35 @@ def _tool_plan(intent: str) -> list[str]:
     return get_default_tool_registry().default_plan_for_intent(intent)
 
 
-def _execution_plan(intent: str, planned_tool_names: list[str]) -> list[str]:
+def _is_reserve_recalculation_request(question: str) -> bool:
+    q = question.lower()
+    return any(
+        token in q
+        for token in (
+            "пересчитай",
+            "перерассчитай",
+            "рассчитай",
+            "посчитай",
+            "calculate",
+            "recalculate",
+        )
+    )
+
+
+def _execution_plan(
+    intent: str,
+    planned_tool_names: list[str],
+    question: str,
+    params: dict[str, object] | None = None,
+) -> list[str]:
     """Keep required tools deterministic, while allowing LLM to add safe support tools."""
-    required = _tool_plan(intent)
+    force_tool = str((params or {}).get("_force_tool") or "")
+    if intent == "reserve_calculation" and (
+        _is_reserve_recalculation_request(question) or force_tool == "calculate_reserve"
+    ):
+        required = ["calculate_reserve", "get_quality_issues", "get_upload_status"]
+    else:
+        required = _tool_plan(intent)
     if intent in {"free_chat", "unsupported_or_ambiguous"}:
         return []
     allowed = set(required)
@@ -1622,6 +2014,12 @@ def _execution_plan(intent: str, planned_tool_names: list[str]) -> list[str]:
         "stock_risk_summary",
     }:
         allowed.update({"get_quality_issues", "get_upload_status", "get_dashboard_summary"})
+    if (
+        intent == "reserve_calculation"
+        and not _is_reserve_recalculation_request(question)
+        and force_tool != "calculate_reserve"
+    ):
+        allowed.discard("calculate_reserve")
     if intent == "management_report_summary":
         allowed.update({"get_upload_status", "get_quality_issues"})
 
@@ -1655,7 +2053,10 @@ def execute_assistant_query(
     state_params = resolve_followup_from_state(question, session_state, plan.params)
     if state_params.get("_pending_intent") and plan.intent in {"free_chat", "unsupported_or_ambiguous"}:
         plan.intent = str(state_params["_pending_intent"])  # type: ignore[assignment]
-    if state_params.get("_followup_intent") and plan.intent in {"free_chat", "unsupported_or_ambiguous"}:
+    if state_params.get("_followup_intent") and (
+        plan.intent in {"free_chat", "unsupported_or_ambiguous"}
+        or _is_contextual_followup_request(question)
+    ):
         plan.intent = str(state_params["_followup_intent"])  # type: ignore[assignment]
     planned_intent, tool_question = _apply_history_fallback_plan(
         question=question,
@@ -1671,13 +2072,13 @@ def execute_assistant_query(
     )
     bundle = build_context_bundle(db, route=route, pinned_context=payload.context)
     registry = get_default_tool_registry()
-    tool_names = _execution_plan(route.intent, plan.tool_names)
     params = _params_from_route(
         question=tool_question,
         bundle=bundle,
         plan_params=plan.params,
         state_params=state_params,
     )
+    tool_names = _execution_plan(route.intent, plan.tool_names, tool_question, params)
     primary_tool_name = tool_names[0] if tool_names else None
     missing_fields: list[AssistantMissingField] = []
     if primary_tool_name:

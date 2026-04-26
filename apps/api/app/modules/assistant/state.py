@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import suppress
 from dataclasses import dataclass, field, replace
 from typing import Any
 
@@ -60,8 +61,15 @@ class AssistantSessionState:
     last_intent: str | None = None
     last_entities: AssistantEntityState = field(default_factory=AssistantEntityState)
     last_filters: dict[str, Any] = field(default_factory=dict)
+    last_metrics: list[str] = field(default_factory=list)
+    last_dimensions: list[str] = field(default_factory=list)
+    last_period: dict[str, Any] = field(default_factory=dict)
+    last_sort: dict[str, Any] = field(default_factory=dict)
+    last_limit: int | None = None
     last_tool_name: str | None = None
     last_result_ref: dict[str, Any] | None = None
+    last_analytics_result_ref: dict[str, Any] | None = None
+    last_question_type: str | None = None
     missing_fields: list[AssistantMissingField] = field(default_factory=list)
     pending_intent: str | None = None
     pending_question: str | None = None
@@ -174,7 +182,38 @@ def derive_state_from_history(history: list[dict[str, Any]] | None) -> Assistant
                 )
             state.last_filters = combined_args
             state.last_entities = _merge_entities(state.last_entities, _entities_from_args(combined_args))
-            if intent in {"sales_summary", "period_comparison", "management_report_summary"}:
+            metrics = combined_args.get("metrics") or combined_args.get("metric")
+            if isinstance(metrics, list):
+                state.last_metrics = [str(item) for item in metrics]
+            elif isinstance(metrics, str):
+                state.last_metrics = [metrics]
+            dimensions = combined_args.get("dimensions") or combined_args.get("dimension")
+            if isinstance(dimensions, list):
+                state.last_dimensions = [str(item) for item in dimensions]
+            elif isinstance(dimensions, str):
+                state.last_dimensions = [dimensions]
+            period = combined_args.get("period")
+            if isinstance(period, dict):
+                state.last_period = dict(period)
+            elif combined_args.get("date_from") and combined_args.get("date_to"):
+                state.last_period = {
+                    "date_from": combined_args.get("date_from"),
+                    "date_to": combined_args.get("date_to"),
+                }
+            state.last_sort = {
+                key: combined_args[key]
+                for key in ("sort_by", "sort_direction")
+                if combined_args.get(key) is not None
+            }
+            if combined_args.get("limit") is not None:
+                try:
+                    state.last_limit = int(combined_args["limit"])
+                except (TypeError, ValueError):
+                    state.last_limit = None
+            if intent == "analytics_slice":
+                state.last_analytics_result_ref = source_ref
+                state.last_question_type = "analytics"
+            if intent in {"sales_summary", "period_comparison", "management_report_summary", "analytics_slice"}:
                 state.comparison_base = {"intent": intent, **combined_args}
     return state
 
@@ -191,6 +230,8 @@ def merge_state(
     next_state.last_entities = replace(state.last_entities)
     next_state.last_filters = dict(state.last_filters)
     next_state.comparison_base = dict(state.comparison_base)
+    next_state.last_period = dict(state.last_period)
+    next_state.last_sort = dict(state.last_sort)
 
     if intent:
         if missing_fields:
@@ -203,6 +244,29 @@ def merge_state(
     if params:
         next_state.last_filters.update(params)
         next_state.last_entities = _merge_entities(next_state.last_entities, _entities_from_args(params))
+        metrics = params.get("metrics") or params.get("metric")
+        if isinstance(metrics, list):
+            next_state.last_metrics = [str(item) for item in metrics]
+        elif isinstance(metrics, str):
+            next_state.last_metrics = [metrics]
+        dimensions = params.get("dimensions") or params.get("dimension")
+        if isinstance(dimensions, list):
+            next_state.last_dimensions = [str(item) for item in dimensions]
+        elif isinstance(dimensions, str):
+            next_state.last_dimensions = [dimensions]
+        period = params.get("period")
+        if isinstance(period, dict):
+            next_state.last_period = dict(period)
+        elif params.get("date_from") and params.get("date_to"):
+            next_state.last_period = {"date_from": params.get("date_from"), "date_to": params.get("date_to")}
+        next_state.last_sort = {
+            key: params[key]
+            for key in ("sort_by", "sort_direction")
+            if params.get(key) is not None
+        } or next_state.last_sort
+        if params.get("limit") is not None:
+            with suppress(TypeError, ValueError):
+                next_state.last_limit = int(params["limit"])
     next_state.missing_fields = list(missing_fields or [])
     return next_state
 
@@ -214,9 +278,25 @@ def resolve_followup_from_state(
 ) -> dict[str, Any]:
     resolved = dict(params or {})
     q = question.lower().strip()
+    has_context = bool(
+        state.pending_intent
+        or state.last_intent
+        or state.last_filters
+        or state.comparison_base
+        or state.last_entities.to_params()
+    )
 
     if state.pending_intent and state.missing_fields:
         resolved.setdefault("_pending_intent", state.pending_intent)
+        pending_question = (state.pending_question or "").lower()
+        if state.pending_intent == "reserve_calculation" and any(
+            token in pending_question
+            for token in ("пересчитай", "перерассчитай", "рассчитай", "посчитай", "calculate", "recalculate")
+        ):
+            resolved.setdefault("_force_tool", "calculate_reserve")
+
+    if not has_context:
+        return resolved
 
     if any(token in q for token in ("почему", "why", "объясни")):
         for key, value in state.last_entities.to_params().items():
@@ -233,18 +313,90 @@ def resolve_followup_from_state(
         if state.last_intent:
             resolved.setdefault("_followup_intent", state.last_intent)
 
+    if any(token in q for token in ("в штуках", "в шт", "штуках", "количество")):
+        for key, value in state.last_filters.items():
+            resolved.setdefault(key, value)
+        resolved["metric"] = "sales_qty"
+        resolved["metrics"] = ["sales_qty"]
+        if state.last_intent in {"sales_summary", "analytics_slice"}:
+            resolved.setdefault("_followup_intent", state.last_intent)
+        else:
+            resolved.setdefault("_followup_intent", "analytics_slice")
+
+    if any(token in q for token in ("по категориям", "по категории", "категориям")):
+        for key, value in state.last_filters.items():
+            resolved.setdefault(key, value)
+        resolved["dimensions"] = ["category"]
+        if state.last_intent in {"sales_summary", "analytics_slice", "reserve_calculation"}:
+            resolved["_followup_intent"] = "analytics_slice"
+        elif state.last_intent:
+            resolved.setdefault("_followup_intent", state.last_intent)
+
+    if any(token in q for token in ("по sku", "по артикулам", "по артикулах", "по товарам")):
+        for key, value in state.last_filters.items():
+            resolved.setdefault(key, value)
+        resolved["dimensions"] = ["sku", "article"]
+        resolved.setdefault("_followup_intent", "analytics_slice")
+
+    top_match = None
+    if "топ" in q:
+        import re
+
+        top_match = re.search(r"топ\s*(\d+)", q)
+    if top_match:
+        for key, value in state.last_filters.items():
+            resolved.setdefault(key, value)
+        resolved["limit"] = int(top_match.group(1))
+        resolved.setdefault("sort_direction", "desc")
+        resolved.setdefault("_followup_intent", state.last_intent or "analytics_slice")
+
+    if "отсортируй по падению" in q or "по падению" in q:
+        for key, value in state.last_filters.items():
+            resolved.setdefault(key, value)
+        resolved["sort_direction"] = "asc"
+        if state.last_metrics:
+            resolved.setdefault("sort_by", state.last_metrics[0])
+        resolved.setdefault("_followup_intent", state.last_intent or "analytics_slice")
+
     if any(token in q for token in ("только проблем", "проблемные", "critical", "критич")):
         for key, value in state.last_entities.to_params().items():
             resolved.setdefault(key, value)
         for key, value in state.last_filters.items():
             resolved.setdefault(key, value)
+        if state.last_intent == "analytics_slice":
+            filters = resolved.get("filters") if isinstance(resolved.get("filters"), dict) else {}
+            filters = dict(filters)
+            filters.setdefault("status", "problematic")
+            filters.setdefault("risk", "at_risk")
+            resolved["filters"] = filters
+        else:
+            resolved.setdefault("status", "problematic")
+            resolved.setdefault("risk", "at_risk")
         if state.last_intent:
             resolved.setdefault("_followup_intent", state.last_intent)
 
     if "прошлым месяц" in q or "прошлый месяц" in q:
         metric = state.comparison_base.get("metric")
         if metric:
-            resolved.setdefault("metric", metric)
+            resolved.setdefault("metric", "quantity" if metric == "sales_qty" else metric)
+        elif state.last_metrics:
+            first_metric = state.last_metrics[0]
+            resolved.setdefault("metric", "quantity" if first_metric == "sales_qty" else first_metric)
+        elif state.last_intent == "sales_summary":
+            resolved.setdefault("metric", "revenue")
+        date_from = str(state.last_filters.get("date_from") or state.comparison_base.get("date_from") or "")
+        if date_from:
+            current_period = date_from[:7]
+            resolved.setdefault("current_period", current_period)
+            if current_period and "-" in current_period:
+                year, month = current_period.split("-", 1)
+                try:
+                    month_number = int(month)
+                    previous_year = int(year) - 1 if month_number == 1 else int(year)
+                    previous_month = 12 if month_number == 1 else month_number - 1
+                    resolved.setdefault("previous_period", f"{previous_year}-{previous_month:02d}")
+                except ValueError:
+                    pass
         if state.last_intent:
             resolved.setdefault("_followup_intent", "period_comparison")
     return resolved

@@ -19,6 +19,8 @@ AssistantIntent = Literal[
     "management_report_summary",
     "sales_summary",
     "period_comparison",
+    "analytics_slice",
+    "data_overview",
     "free_chat",
     "unsupported_or_ambiguous",
 ]

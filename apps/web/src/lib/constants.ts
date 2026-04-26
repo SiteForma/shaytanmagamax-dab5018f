@@ -5,7 +5,7 @@ export const NAV_SECTIONS = [
   { label: "Каталог SKU", path: "/sku", icon: "Boxes" as const, capability: "catalog:read" as const },
   { label: "Сети DIY", path: "/clients", icon: "Building2" as const, capability: "clients:read" as const },
   { label: "Склад и покрытие", path: "/stock", icon: "Warehouse" as const, capability: "stock:read" as const },
-  { label: "Входящие поставки", path: "/inbound", icon: "Truck" as const, capability: "inbound:read" as const },
+  { label: "Товары в пути", path: "/inbound", icon: "Truck" as const, capability: "inbound:read" as const },
   { label: "Центр загрузки", path: "/uploads", icon: "Upload" as const, capability: "uploads:read" as const },
   { label: "Сопоставление данных", path: "/mapping", icon: "Workflow" as const, capability: "mapping:read" as const },
   { label: "Качество данных", path: "/quality", icon: "ShieldAlert" as const, capability: "quality:read" as const },

@@ -44,6 +44,12 @@ class Settings(BaseSettings):
     assistant_input_usd_per_1m_tokens: float = 0.15
     assistant_output_usd_per_1m_tokens: float = 0.60
     assistant_rub_per_usd: float = 300.0
+
+    inbound_google_sheet_id: str = "19RQsO_tTO1-D8hN_j0GZZvlQZNRCzsLSGgN9GU-K1_k"
+    inbound_google_sheet_gid: str = "1657756957"
+    inbound_google_sheet_export_url: str | None = None
+    inbound_google_sheet_sync_hour_moscow: int = 8
+
     sentry_dsn: str | None = None
     sentry_traces_sample_rate: float = 0.0
     otel_enabled: bool = False

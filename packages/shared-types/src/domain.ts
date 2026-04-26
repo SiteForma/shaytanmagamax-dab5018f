@@ -99,9 +99,12 @@ export interface InboundDelivery {
   id: ID;
   skuId: ID;
   qty: number;
+  freeStockAfterAllocation?: number;
+  clientOrderQty?: number;
   eta: string;
   status: DeliveryStatus | string;
   affectedClients: ID[];
+  clientAllocations?: Record<string, number>;
   reserveImpact: number;
 }
 
@@ -343,6 +346,7 @@ export interface DashboardSummary {
   totalReserveShortage: number;
   inboundWithinHorizon: number;
   avgCoverageMonths: number;
+  assistantApiCostRub: number;
   lastUpdate: string;
   freshnessHours: number;
 }
@@ -360,6 +364,8 @@ export type AssistantIntent =
   | "management_report_summary"
   | "sales_summary"
   | "period_comparison"
+  | "analytics_slice"
+  | "data_overview"
   | "free_chat"
   | "unsupported_or_ambiguous";
 
@@ -564,6 +570,8 @@ export interface CurrentUser {
   id: ID;
   email: string;
   fullName: string;
+  firstName: string;
+  lastName: string;
   roles: string[];
   capabilities: string[];
 }

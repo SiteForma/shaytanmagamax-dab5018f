@@ -6,14 +6,19 @@ import { DataTable } from "@/components/ui-ext/DataTable";
 import { FilterChips } from "@/components/ui-ext/FilterChips";
 import { QueryErrorState } from "@/components/ui-ext/QueryErrorState";
 import { StatusBadge } from "@/components/ui-ext/StatusBadge";
-import { useInboundTimelineQuery } from "@/hooks/queries/use-inbound";
-import type { InboundWithRefs } from "@/services/inbound.service";
+import { useInboundSyncMutation, useInboundTimelineQuery } from "@/hooks/queries/use-inbound";
+import { useHasCapability } from "@/hooks/queries/use-auth";
 import { fmtDate, fmtInt } from "@/lib/formatters";
+import { Button } from "@/components/ui/button";
+import { RefreshCw } from "lucide-react";
+import { toast } from "sonner";
 
 export default function InboundPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const status = searchParams.get("status") ?? "all";
   const inboundQuery = useInboundTimelineQuery();
+  const syncMutation = useInboundSyncMutation();
+  const canSync = useHasCapability("inbound:sync");
   const filteredRows = useMemo(
     () => {
       const rows = inboundQuery.data ?? [];
@@ -23,18 +28,48 @@ export default function InboundPage() {
   );
 
   const columns: ColumnDef<any>[] = [
+    { accessorKey: "containerRef", header: "Контейнер", cell: (i) => i.getValue() || "—" },
     { accessorKey: "sku.article", header: "Артикул", cell: (i) => <span className="text-num font-medium text-ink">{i.row.original.sku.article}</span> },
     { accessorKey: "sku.name", header: "Товар", cell: (i) => i.row.original.sku.name },
-    { accessorKey: "qty", header: "Кол-во", meta: { align: "right", mono: true }, cell: (i) => fmtInt(i.getValue() as number) },
+    { accessorKey: "qty", header: "В пути", meta: { align: "right", mono: true }, cell: (i) => fmtInt(i.getValue() as number) },
+    { accessorKey: "clientOrderQty", header: "Заказы клиентов", meta: { align: "right", mono: true }, cell: (i) => fmtInt(i.getValue() as number) },
+    { accessorKey: "freeStockAfterAllocation", header: "Свободный остаток", meta: { align: "right", mono: true }, cell: (i) => <span className="text-success">{fmtInt(i.getValue() as number)}</span> },
     { accessorKey: "eta", header: "Прибытие", cell: (i) => fmtDate(i.getValue() as string) },
-    { accessorKey: "reserveImpact", header: "Закрывает дефицит", meta: { align: "right", mono: true }, cell: (i) => <span className="text-brand">{fmtInt(i.getValue() as number)}</span> },
-    { accessorKey: "clients", header: "Клиенты", cell: (i) => (i.row.original.clients as any[]).map((c) => c.name).join(", ") },
+    { accessorKey: "clients", header: "Распределение", cell: (i) => {
+      const allocations = i.row.original.clientAllocations as Record<string, number>;
+      const parts = Object.entries(allocations ?? {}).slice(0, 4).map(([name, qty]) => `${name}: ${fmtInt(qty)}`);
+      const extra = Object.keys(allocations ?? {}).length - parts.length;
+      return parts.length ? `${parts.join(", ")}${extra > 0 ? ` +${extra}` : ""}` : "—";
+    } },
     { accessorKey: "status", header: "Статус", cell: (i) => <StatusBadge value={i.getValue() as any} /> },
   ];
 
   return (
     <>
-      <PageHeader eyebrow="Поставки" title="Входящие поставки" description="Ближайшие поступления по SKU и их прогнозируемое влияние на текущий дефицит." />
+      <PageHeader
+        eyebrow="Поставки"
+        title="Товары в пути"
+        description="Данные из Google Sheet: «В пути» — количество в контейнере, «Свободный остаток» — остаток после распределения по клиентам."
+        actions={
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-9 border-line-subtle bg-surface-panel"
+            disabled={!canSync || syncMutation.isPending}
+            onClick={async () => {
+              try {
+                const result = await syncMutation.mutateAsync();
+                toast.success(`Синхронизировано: ${fmtInt(result.rowsImported)} строк, в пути ${fmtInt(result.totalInTransitQty)} шт.`);
+              } catch {
+                toast.error("Не удалось синхронизировать Google Sheet");
+              }
+            }}
+          >
+            <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${syncMutation.isPending ? "animate-spin" : ""}`} />
+            {syncMutation.isPending ? "Синхронизация…" : "Синхронизировать"}
+          </Button>
+        }
+      />
       {inboundQuery.error ? (
         <QueryErrorState
           error={inboundQuery.error}

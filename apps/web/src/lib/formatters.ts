@@ -2,11 +2,18 @@
 const compactFmt = new Intl.NumberFormat("ru-RU", { notation: "compact", maximumFractionDigits: 1 });
 const intFmt = new Intl.NumberFormat("ru-RU");
 const oneDecFmt = new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+const rubFmt = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 });
+const rubSmallFmt = new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 export function fmtInt(n: number) { return intFmt.format(n); }
 export function fmtCompact(n: number) { return compactFmt.format(n); }
 export function fmtMonths(n: number) { return `${oneDecFmt.format(n)} мес.`; }
 export function fmtPct(n: number) { return `${(n * 100).toFixed(0)}%`; }
+export function fmtRub(n: number) {
+  if (!Number.isFinite(n) || n <= 0) return "0 руб.";
+  if (n < 1) return `${rubSmallFmt.format(n)} руб.`;
+  return `${rubFmt.format(n)} руб.`;
+}
 
 export function fmtDate(iso: string) {
   return new Date(iso).toLocaleDateString("ru-RU", { day: "2-digit", month: "short", year: "numeric" });

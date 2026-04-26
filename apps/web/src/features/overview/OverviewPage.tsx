@@ -9,8 +9,8 @@ import { QueryErrorState } from "@/components/ui-ext/QueryErrorState";
 import { useDashboardOverviewQuery } from "@/hooks/queries/use-dashboard";
 import { useDashboardTopRiskExportMutation } from "@/hooks/mutations/use-exports";
 import { useHasCapability } from "@/hooks/queries/use-auth";
-import { fmtCompact, fmtInt, fmtMonths, fmtRelative } from "@/lib/formatters";
-import { Boxes, Building2, AlertTriangle, PackageMinus, Truck, Activity, Calculator, Upload, Sparkles, ShieldAlert } from "lucide-react";
+import { fmtCompact, fmtInt, fmtMonths, fmtRelative, fmtRub } from "@/lib/formatters";
+import { Boxes, AlertTriangle, PackageMinus, Truck, Activity, Calculator, Upload, Sparkles, ShieldAlert } from "lucide-react";
 import { Download } from "lucide-react";
 import { toast } from "sonner";
 
@@ -81,7 +81,7 @@ export default function Overview() {
         {data ? (
           <>
             <KpiCard label="SKU в учёте" value={data.summary.totalSkusTracked} format="int" icon={Boxes} hint="Активный мастер" />
-            <KpiCard label="Клиенты DIY" value={data.summary.diyClientsUnderReserve} format="int" icon={Building2} hint="Под резервом" />
+            <KpiCard label="ChatGPT API" value={fmtRub(data.summary.assistantApiCostRub)} format="raw" icon={Sparkles} hint="Потрачено" emphasis="brand" />
             <KpiCard label="Под риском" value={data.summary.positionsAtRisk} format="int" icon={AlertTriangle} emphasis="warning" hint="Ниже цели" />
             <KpiCard label="Дефицит резерва" value={data.summary.totalReserveShortage} unit="шт." icon={PackageMinus} emphasis="danger" />
             <KpiCard label="Поставки (60д)" value={data.summary.inboundWithinHorizon} unit="шт." icon={Truck} emphasis="brand" />

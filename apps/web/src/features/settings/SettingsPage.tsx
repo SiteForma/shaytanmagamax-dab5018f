@@ -1,10 +1,13 @@
-import { useState, type DragEvent } from "react";
+import { useEffect, useState, type DragEvent, type FormEvent } from "react";
 import { PageHeader, SectionTitle } from "@/components/ui-ext/PageHeader";
-import { MagamaxLogo } from "@/components/brand/MagamaxLogo";
 import { useTheme } from "@/lib/theme";
 import { Button } from "@/components/ui/button";
 import { LoginDialog } from "@/components/auth/LoginDialog";
-import { useCurrentUserQuery, useLogoutAction } from "@/hooks/queries/use-auth";
+import {
+  useCurrentUserQuery,
+  useLogoutAction,
+  useUpdateCurrentUserProfileMutation,
+} from "@/hooks/queries/use-auth";
 import { NAV_SECTIONS } from "@/lib/constants";
 import { hasCapability } from "@/lib/access";
 import {
@@ -33,6 +36,7 @@ import {
   Workflow,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
 
 const NAV_ICONS = {
   LayoutDashboard,
@@ -53,7 +57,14 @@ export default function SettingsPage() {
   const { theme, setTheme } = useTheme();
   const [loginOpen, setLoginOpen] = useState(false);
   const [draggedPath, setDraggedPath] = useState<string | null>(null);
+  const [profileForm, setProfileForm] = useState({
+    firstName: "",
+    lastName: "",
+    currentPassword: "",
+    newPassword: "",
+  });
   const { data: currentUser } = useCurrentUserQuery();
+  const updateProfile = useUpdateCurrentUserProfileMutation();
   const logout = useLogoutAction();
   const { order, setOrder, resetOrder } = useSidebarMenuOrder();
   const { labels, setLabels, resetLabels } = useSidebarMenuLabels();
@@ -78,9 +89,43 @@ export default function SettingsPage() {
     setDraggedPath(null);
   };
 
+  useEffect(() => {
+    if (!currentUser) return;
+    setProfileForm((current) => ({
+      ...current,
+      firstName: currentUser.firstName,
+      lastName: currentUser.lastName,
+    }));
+  }, [currentUser]);
+
+  const handleProfileSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!currentUser) {
+      setLoginOpen(true);
+      return;
+    }
+    if (profileForm.newPassword && !profileForm.currentPassword) {
+      toast.error("Укажите текущий пароль для смены пароля");
+      return;
+    }
+
+    try {
+      await updateProfile.mutateAsync({
+        firstName: profileForm.firstName,
+        lastName: profileForm.lastName,
+        currentPassword: profileForm.currentPassword || undefined,
+        newPassword: profileForm.newPassword || undefined,
+      });
+      setProfileForm((current) => ({ ...current, currentPassword: "", newPassword: "" }));
+      toast.success("Профиль пользователя обновлён");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Не удалось обновить профиль");
+    }
+  };
+
   return (
     <>
-      <PageHeader eyebrow="Рабочее пространство" title="Настройки" description="Личные значения по умолчанию: тема, плотность таблиц, горизонт резерва, статус брендовых ассетов." />
+      <PageHeader eyebrow="Рабочее пространство" title="Настройки" description="Личные значения по умолчанию, профиль пользователя и порядок рабочего меню." />
 
       <section className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <div className="panel p-5 space-y-4">
@@ -112,27 +157,95 @@ export default function SettingsPage() {
           ))}
         </div>
 
-        <div className="panel p-5 space-y-4">
-          <SectionTitle>Брендовый ассет</SectionTitle>
-          <div className="rounded-lg border border-line-subtle bg-surface-muted/50 p-4">
-            <MagamaxLogo />
-          </div>
-          <p className="text-xs text-ink-muted">Используется оригинальный знак MAGAMAX и отдельный theme-aware wordmark без фоновой подложки. Для замены обновляйте файлы <span className="text-num">apps/web/src/assets/magamax-mark.png</span> и <span className="text-num">apps/web/src/assets/magamax-wordmark-*.png</span>.</p>
-          <div className="flex items-center justify-between rounded-md border border-line-subtle bg-surface-muted/50 px-3 py-2 text-xs">
-            <span className="text-ink-muted">Основной цвет бренда</span>
-            <span className="flex items-center gap-2"><span className="h-3 w-3 rounded-sm bg-brand" /><span className="text-num">#FF671F</span></span>
+        <form className="panel p-5 space-y-4" onSubmit={handleProfileSubmit}>
+          <div className="flex items-start justify-between gap-3">
+            <div className="space-y-1">
+              <SectionTitle>Пользователь</SectionTitle>
+              <p className="text-xs leading-relaxed text-ink-muted">
+                Данные синхронизируются с таблицей пользователей в БД. Роль назначается администратором.
+              </p>
+            </div>
+            <span className="rounded-full border border-brand/25 bg-brand/10 px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.12em] text-brand">
+              {currentUser?.roles?.[0] ?? "dev"}
+            </span>
           </div>
 
-          <div className="rounded-lg border border-line-subtle bg-surface-muted/50 p-4 space-y-3">
-            <SectionTitle className="!text-[11px]">Сессия</SectionTitle>
-            <div className="space-y-1 text-sm">
-              <div className="font-medium text-ink">{currentUser?.fullName ?? "Локальная dev-сессия"}</div>
-              <div className="text-xs text-ink-muted">
-                {currentUser?.email ?? "Доступ в development через X-Dev-User: user_admin"}
-              </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="space-y-1.5 text-xs text-ink-muted">
+              <span>Имя</span>
+              <input
+                value={profileForm.firstName}
+                onChange={(event) => setProfileForm((current) => ({ ...current, firstName: event.target.value }))}
+                className="h-10 w-full rounded-lg border border-line-subtle bg-surface-panel px-3 text-sm font-medium text-ink outline-none transition focus:border-brand/50"
+                placeholder="Имя"
+                disabled={!currentUser || updateProfile.isPending}
+              />
+            </label>
+            <label className="space-y-1.5 text-xs text-ink-muted">
+              <span>Фамилия</span>
+              <input
+                value={profileForm.lastName}
+                onChange={(event) => setProfileForm((current) => ({ ...current, lastName: event.target.value }))}
+                className="h-10 w-full rounded-lg border border-line-subtle bg-surface-panel px-3 text-sm font-medium text-ink outline-none transition focus:border-brand/50"
+                placeholder="Фамилия"
+                disabled={!currentUser || updateProfile.isPending}
+              />
+            </label>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="space-y-1.5 text-xs text-ink-muted">
+              <span>Email</span>
+              <input
+                value={currentUser?.email ?? "Доступ в development через X-Dev-User: user_admin"}
+                readOnly
+                className="h-10 w-full rounded-lg border border-line-subtle bg-surface-muted/55 px-3 text-sm text-ink-secondary outline-none"
+              />
+            </label>
+            <label className="space-y-1.5 text-xs text-ink-muted">
+              <span>Роль</span>
+              <input
+                value={currentUser?.roles?.join(", ") || "dev"}
+                readOnly
+                className="h-10 w-full rounded-lg border border-line-subtle bg-surface-muted/55 px-3 text-sm text-ink-secondary outline-none"
+              />
+            </label>
+          </div>
+
+          <div className="rounded-xl border border-line-subtle bg-surface-muted/35 p-3 space-y-3">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-muted">
+              Смена пароля
             </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="space-y-1.5 text-xs text-ink-muted">
+                <span>Текущий пароль</span>
+                <input
+                  type="password"
+                  value={profileForm.currentPassword}
+                  onChange={(event) => setProfileForm((current) => ({ ...current, currentPassword: event.target.value }))}
+                  className="h-10 w-full rounded-lg border border-line-subtle bg-surface-panel px-3 text-sm text-ink outline-none transition focus:border-brand/50"
+                  placeholder="Введите текущий пароль"
+                  disabled={!currentUser || updateProfile.isPending}
+                />
+              </label>
+              <label className="space-y-1.5 text-xs text-ink-muted">
+                <span>Новый пароль</span>
+                <input
+                  type="password"
+                  value={profileForm.newPassword}
+                  onChange={(event) => setProfileForm((current) => ({ ...current, newPassword: event.target.value }))}
+                  className="h-10 w-full rounded-lg border border-line-subtle bg-surface-panel px-3 text-sm text-ink outline-none transition focus:border-brand/50"
+                  placeholder="Минимум 8 символов"
+                  disabled={!currentUser || updateProfile.isPending}
+                />
+              </label>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap justify-between gap-2">
             <div className="flex gap-2">
               <Button
+                type="button"
                 size="sm"
                 variant="outline"
                 className="border-line-subtle bg-surface-panel"
@@ -141,6 +254,7 @@ export default function SettingsPage() {
                 {currentUser ? "Сменить сессию" : "Войти"}
               </Button>
               <Button
+                type="button"
                 size="sm"
                 variant="outline"
                 className="border-line-subtle bg-surface-panel"
@@ -149,8 +263,16 @@ export default function SettingsPage() {
                 Выйти
               </Button>
             </div>
+            <Button
+              type="submit"
+              size="sm"
+              className="bg-brand text-brand-foreground hover:bg-brand-hover"
+              disabled={!currentUser || updateProfile.isPending}
+            >
+              {updateProfile.isPending ? "Сохранение…" : "Сохранить профиль"}
+            </Button>
           </div>
-        </div>
+        </form>
       </section>
 
       <section className="mt-4">

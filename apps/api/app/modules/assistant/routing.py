@@ -114,14 +114,12 @@ def _is_management_report_question(question: str) -> bool:
             "отчёт 2025",
             "2025.xlsx",
             "подраздел",
-            "выруч",
             "рентаб",
+            "марж",
             "пдз",
             "дебитор",
             "недопостав",
             "товарная группа",
-            "товар",
-            "товарн",
             "заработ",
             "регионы опт",
             "сети -",
@@ -136,7 +134,7 @@ def _is_management_report_question(question: str) -> bool:
 
     # In MAGAMAX reports, "ТГ" is the common shorthand for "товарная группа".
     # Require nearby business/report language to avoid treating generic chat about Telegram as report data.
-    if PRODUCT_GROUP_ABBR_PATTERN.search(question) and any(
+    return bool(PRODUCT_GROUP_ABBR_PATTERN.search(question)) and any(
         token in question
         for token in (
             "2024",
@@ -151,23 +149,84 @@ def _is_management_report_question(question: str) -> bool:
             "лучше",
             "хуже",
         )
-    ):
-        return True
-    return False
+    )
+
+
+def _is_analytics_slice_question(question: str) -> bool:
+    slice_tokens = (
+        "по категория",
+        "по клиент",
+        "по sku",
+        "по артику",
+        "по скла",
+        "по месяц",
+        "по кварт",
+        "в разрезе",
+        "срез",
+        "топ",
+    )
+    metric_tokens = (
+        "продаж",
+        "выруч",
+        "штук",
+        "шт",
+        "остат",
+        "склад",
+        "резерв",
+        "дефицит",
+        "покрыт",
+        "постав",
+    )
+    return any(token in question for token in slice_tokens) and any(
+        token in question for token in metric_tokens
+    )
+
+
+def _is_data_overview_question(question: str) -> bool:
+    broad_tokens = (
+        "что есть в бд",
+        "что есть в базе",
+        "какие данные есть",
+        "какие данные доступны",
+        "какие источники доступны",
+        "покажи всё полезное",
+        "покажи все полезное",
+        "покажи всё что есть",
+        "покажи все что есть",
+        "обзор данных",
+        "инвентаризация данных",
+        "что загружено в бд",
+        "что загружено в базе",
+    )
+    return any(token in question for token in broad_tokens)
 
 
 def _detect_intent(question: str) -> str:
     q = _flatten_text(question)
     if not q:
         return "unsupported_or_ambiguous"
+    if _is_data_overview_question(q):
+        return "data_overview"
+    if any(token in q for token in ("рассчитай", "пересчитай", "перерассчитай", "calculate")) and any(
+        token in q for token in ("резерв", "reserve")
+    ):
+        return "reserve_calculation"
     if _is_management_report_question(q):
         return "management_report_summary"
+    if "дефицит" in q and any(token in q for token in ("товар", "sku", "артикул")):
+        return "analytics_slice"
+    if "топ sku" in q or "топ артик" in q:
+        return "analytics_slice"
+    if _is_analytics_slice_question(q):
+        return "analytics_slice"
+    if any(token in q for token in ("просел", "просели", "хуже всего продав", "динамик")):
+        return "analytics_slice"
     if any(token in q for token in ("сравни", "сравнить", "сравнение")) and any(
-        token in q for token in ("месяц", "период", "прошл")
+        token in q for token in ("месяц", "период", "прошл", "2024", "2025", "год")
     ):
         return "period_comparison"
-    if any(token in q for token in ("продаж", "sales", "реализац")):
-        return "sales_summary"
+    if any(token in q for token in ("продаж", "sales", "реализац", "выруч", "остат")):
+        return "analytics_slice"
     if any(token in q for token in ("объясни", "почему", "why", "fallback")) and any(
         token in q for token in ("резерв", "дефицит", "critical", "критич", "shortage", "sku")
     ):
@@ -176,8 +235,16 @@ def _detect_intent(question: str) -> str:
         return "reserve_calculation"
     if "ниже резерва" in q or "under reserve" in q or "недопокрыт" in q:
         return "diy_coverage_check"
+    if any(token in q for token in ("пришл", "поступил", "поступл")) and any(
+        token in q for token in ("склад", "постав", "inbound")
+    ):
+        return "analytics_slice"
     if any(token in q for token in ("постав", "inbound", "incoming", "eta")):
         return "inbound_impact"
+    if any(token in q for token in ("critical", "критич", "проблемн")) and any(
+        token in q for token in ("позици", "sku", "товар")
+    ):
+        return "stock_risk_summary"
     if any(token in q for token in ("склад", "stock risk", "stockout", "coverage", "покрытие", "зоне риска", "зона риска")):
         return "stock_risk_summary"
     if any(token in q for token in ("качество", "quality", "issue", "проблемы данных")):

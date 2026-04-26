@@ -75,7 +75,7 @@ def test_assistant_stream_emits_clarification_event(client: TestClient) -> None:
     with client.stream(
         "POST",
         f"/api/assistant/sessions/{session_id}/messages/stream",
-        json={"text": "Покажи резерв"},
+        json={"text": "Пересчитай резерв"},
     ) as response:
         assert response.status_code == 200
         events = _events_from_stream(response)
@@ -102,4 +102,4 @@ def test_assistant_stream_emits_tool_events(client: TestClient) -> None:
     event_types = [event["type"] for event in events]
     assert "tool_call" in event_types
     assert "tool_result" in event_types
-    assert any(event.get("toolName") == "calculate_reserve" for event in events)
+    assert any(event.get("toolName") == "get_reserve" for event in events)

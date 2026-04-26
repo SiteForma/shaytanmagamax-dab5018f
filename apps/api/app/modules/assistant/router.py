@@ -49,7 +49,7 @@ def _encode_sse_event(event: dict[str, object]) -> bytes:
     payload = dict(event)
     payload["type"] = event_type
     data = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
-    return f"event: {event_type}\ndata: {data}\n\n".encode("utf-8")
+    return f"event: {event_type}\ndata: {data}\n\n".encode()
 
 
 @router.post("/sessions", response_model=AssistantSessionSummary)
@@ -247,6 +247,6 @@ def prompt_suggestions_route() -> AssistantPromptSuggestionsResponse:
 @router.get("/context-options", response_model=AssistantContextOptionsResponse)
 def context_options_route(
     db: Session = Depends(get_db),
-    _current_user: User = Depends(require_capability("assistant", "query")),
+    current_user: User = Depends(require_capability("assistant", "query")),
 ) -> AssistantContextOptionsResponse:
-    return get_context_options(db)
+    return get_context_options(db, current_user)

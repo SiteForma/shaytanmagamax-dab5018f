@@ -1,15 +1,18 @@
 from __future__ import annotations
 
+import logging
 import time
 from collections.abc import Iterator
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from apps.api.app.common.utils import generate_id
 from apps.api.app.core.config import Settings
-from apps.api.app.db.models import Category, User
-from apps.api.app.db.models import AssistantMessage
+from apps.api.app.db.models import AssistantMessage, Category, User
+from apps.api.app.modules.access.service import user_has_capability
 from apps.api.app.modules.assistant.orchestration import execute_assistant_query
+from apps.api.app.modules.assistant.permissions import user_has_assistant_internal_analytics
 from apps.api.app.modules.assistant.repository import (
     append_assistant_message,
     append_user_message,
@@ -46,6 +49,8 @@ from apps.api.app.modules.catalog.service import list_skus
 from apps.api.app.modules.clients.service import list_clients
 from apps.api.app.modules.reserve.service import list_runs
 from apps.api.app.modules.uploads.service import list_upload_files
+
+logger = logging.getLogger(__name__)
 
 PROMPT_SUGGESTIONS = [
     AssistantPromptSuggestion(
@@ -354,6 +359,7 @@ def stream_assistant_message_events(
     payload: AssistantMessageCreateRequest,
     current_user: User | None,
 ) -> Iterator[dict[str, object]]:
+    trace_id = generate_id("trace")
     yield {
         "type": "thinking",
         "sessionId": session_id,
@@ -438,10 +444,15 @@ def stream_assistant_message_events(
         }
     except Exception as exc:
         db.rollback()
+        logger.exception(
+            "Assistant stream failed",
+            extra={"assistant_trace_id": trace_id, "session_id": session_id},
+        )
         yield {
             "type": "error",
             "code": getattr(exc, "code", "assistant_stream_failed"),
-            "message": getattr(exc, "message", str(exc)),
+            "message": "Не удалось обработать запрос. Передайте traceId администратору.",
+            "traceId": trace_id,
         }
 
 
@@ -491,6 +502,8 @@ def get_assistant_capabilities(settings: Settings) -> AssistantCapabilitiesRespo
             AssistantCapability(key="management_report_summary", label="Управленческий отчёт 2025"),
             AssistantCapability(key="sales_summary", label="Сводка продаж"),
             AssistantCapability(key="period_comparison", label="Сравнение периодов"),
+            AssistantCapability(key="analytics_slice", label="Аналитические срезы"),
+            AssistantCapability(key="data_overview", label="Что есть в БД"),
         ],
         sessionSupport=True,
         pinnedContextSupport=True,
@@ -501,27 +514,41 @@ def get_prompt_suggestions() -> AssistantPromptSuggestionsResponse:
     return AssistantPromptSuggestionsResponse(items=PROMPT_SUGGESTIONS)
 
 
-def get_context_options(db: Session) -> AssistantContextOptionsResponse:
-    clients = [
-        AssistantContextOption(id=item.id, label=item.name, hint=item.region)
-        for item in list_clients(db)
-    ]
-    skus = [
-        AssistantContextOption(id=item.id, label=f"{item.article} · {item.name}", hint=item.category)
-        for item in list_skus(db)[:60]
-    ]
-    uploads = [
-        AssistantContextOption(id=item.id, label=item.file_name, hint=item.status)
-        for item in list_upload_files(db)[:25]
-    ]
-    reserve_runs = [
-        AssistantContextOption(id=item.id, label=f"{item.id} · {item.scope_type}", hint=item.created_at)
-        for item in list_runs(db)[:20]
-    ]
-    categories = [
-        AssistantContextOption(id=category.id, label=category.name, hint=category.code)
-        for category in db.scalars(select(Category).order_by(Category.name)).all()
-    ]
+def get_context_options(db: Session, current_user: User | None) -> AssistantContextOptionsResponse:
+    full_internal = user_has_assistant_internal_analytics(current_user)
+
+    clients = []
+    if full_internal or user_has_capability(db, current_user, "clients", "read"):
+        clients = [
+            AssistantContextOption(id=item.id, label=item.name, hint=item.region)
+            for item in list_clients(db)
+        ]
+
+    skus = []
+    categories = []
+    if full_internal or user_has_capability(db, current_user, "catalog", "read"):
+        skus = [
+            AssistantContextOption(id=item.id, label=f"{item.article} · {item.name}", hint=item.category)
+            for item in list_skus(db)[:60]
+        ]
+        categories = [
+            AssistantContextOption(id=category.id, label=category.name, hint=category.code)
+            for category in db.scalars(select(Category).order_by(Category.name)).all()
+        ]
+
+    uploads = []
+    if full_internal or user_has_capability(db, current_user, "uploads", "read"):
+        uploads = [
+            AssistantContextOption(id=item.id, label=item.file_name, hint=item.status)
+            for item in list_upload_files(db)[:25]
+        ]
+
+    reserve_runs = []
+    if full_internal or user_has_capability(db, current_user, "reserve", "read"):
+        reserve_runs = [
+            AssistantContextOption(id=item.id, label=f"{item.id} · {item.scope_type}", hint=item.created_at)
+            for item in list_runs(db)[:20]
+        ]
     return AssistantContextOptionsResponse(
         clients=clients,
         skus=skus,

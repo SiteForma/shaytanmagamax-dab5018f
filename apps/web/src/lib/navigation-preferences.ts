@@ -168,6 +168,26 @@ export function applyNavLabels<T extends { path: string; label: string }>(
   return items.map((item) => ({ ...item, label: labels[item.path] ?? item.label }));
 }
 
+export function findSidebarMenuPath(pathname: string): string | null {
+  const normalizedPathname = pathname.split(/[?#]/)[0] || "/";
+  if (normalizedPathname === "/") return "/";
+
+  const candidates = DEFAULT_SIDEBAR_MENU_ORDER
+    .filter((path) => path !== "/" && (normalizedPathname === path || normalizedPathname.startsWith(`${path}/`)))
+    .sort((left, right) => right.length - left.length);
+
+  return candidates[0] ?? null;
+}
+
+export function resolveSidebarPageTitle(
+  pathname: string,
+  fallbackTitle: string,
+  labels: Record<string, string>,
+): string {
+  const matchedPath = findSidebarMenuPath(pathname);
+  return matchedPath ? labels[matchedPath] ?? fallbackTitle : fallbackTitle;
+}
+
 export function useSidebarMenuOrder() {
   const [order, setOrderState] = useState<string[]>(readSidebarMenuOrder);
 

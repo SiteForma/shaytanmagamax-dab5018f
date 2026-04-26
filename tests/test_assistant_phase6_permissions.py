@@ -75,9 +75,9 @@ def test_user_without_reserve_read_cannot_use_reserve_tool_through_assistant(
 
     assert response.status_code == 403
     assert response.json()["code"] == "permission_denied"
-    assert response.json()["details"]["permission_denied_tool"] == "calculate_reserve"
+    assert response.json()["details"]["permission_denied_tool"] == "get_reserve"
     assert response.json()["details"]["resolved_intent"] == "reserve_calculation"
-    assert response.json()["details"]["resolved_tool"] == "calculate_reserve"
+    assert response.json()["details"]["resolved_tool"] == "get_reserve"
 
 
 def test_user_without_reports_read_cannot_use_management_report_tool_through_assistant(
@@ -105,4 +105,4 @@ def test_user_without_sales_read_cannot_use_sales_tool_through_assistant(
 
     assert response.status_code == 403
     assert response.json()["code"] == "permission_denied"
-    assert response.json()["details"]["permission_denied_tool"] == "get_sales_summary"
+    assert response.json()["details"]["permission_denied_tool"] == "get_analytics_slice"
