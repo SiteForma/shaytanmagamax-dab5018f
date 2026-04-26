@@ -1,6 +1,9 @@
 import { fireEvent, screen } from "@testing-library/react";
 import SettingsPage from "@/features/settings/SettingsPage";
-import { SIDEBAR_MENU_ORDER_STORAGE_KEY } from "@/lib/navigation-preferences";
+import {
+  SIDEBAR_MENU_LABELS_STORAGE_KEY,
+  SIDEBAR_MENU_ORDER_STORAGE_KEY,
+} from "@/lib/navigation-preferences";
 import { renderWithProviders } from "@/test/render";
 
 const useCurrentUserQuery = vi.fn();
@@ -42,5 +45,20 @@ describe("SettingsPage", () => {
 
     const saved = JSON.parse(window.localStorage.getItem(SIDEBAR_MENU_ORDER_STORAGE_KEY) ?? "[]");
     expect(saved.indexOf("/uploads")).toBeLessThan(saved.indexOf("/ai"));
+  });
+
+  it("persists custom sidebar menu labels and can reset them", () => {
+    renderWithProviders(<SettingsPage />, "/settings");
+
+    fireEvent.change(screen.getByLabelText("Название пункта меню ИИ-консоль"), {
+      target: { value: "Шайтан AI" },
+    });
+
+    expect(JSON.parse(window.localStorage.getItem(SIDEBAR_MENU_LABELS_STORAGE_KEY) ?? "{}")).toEqual({
+      "/ai": "Шайтан AI",
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Сбросить названия" }));
+    expect(window.localStorage.getItem(SIDEBAR_MENU_LABELS_STORAGE_KEY)).toBeNull();
   });
 });

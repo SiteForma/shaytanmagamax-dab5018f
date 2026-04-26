@@ -28,7 +28,12 @@ import { MagamaxLogo } from "@/components/brand/MagamaxLogo";
 import { useCurrentUserQuery } from "@/hooks/queries/use-auth";
 import { hasCapability } from "@/lib/access";
 import { NAV_SECTIONS, PRODUCT } from "@/lib/constants";
-import { orderNavItems, useSidebarMenuOrder } from "@/lib/navigation-preferences";
+import {
+  applyNavLabels,
+  orderNavItems,
+  useSidebarMenuLabels,
+  useSidebarMenuOrder,
+} from "@/lib/navigation-preferences";
 import { cn } from "@/lib/utils";
 
 const NAV_ICONS = {
@@ -50,9 +55,13 @@ export function AppSidebar() {
   const { pathname } = useLocation();
   const { data: currentUser } = useCurrentUserQuery();
   const { order } = useSidebarMenuOrder();
-  const navItems = orderNavItems(
-    NAV_SECTIONS.filter((item) => !item.capability || hasCapability(currentUser, item.capability)),
-    order,
+  const { labels } = useSidebarMenuLabels();
+  const navItems = applyNavLabels(
+    orderNavItems(
+      NAV_SECTIONS.filter((item) => !item.capability || hasCapability(currentUser, item.capability)),
+      order,
+    ),
+    labels,
   );
 
   return (

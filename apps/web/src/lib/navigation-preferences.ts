@@ -2,9 +2,14 @@ import { useCallback, useEffect, useState } from "react";
 import { NAV_SECTIONS } from "@/lib/constants";
 
 export const SIDEBAR_MENU_ORDER_STORAGE_KEY = "magamax.sidebar.menuOrder.v1";
+export const SIDEBAR_MENU_LABELS_STORAGE_KEY = "magamax.sidebar.menuLabels.v1";
 const SIDEBAR_MENU_ORDER_EVENT = "magamax:sidebar-menu-order";
+const SIDEBAR_MENU_LABELS_EVENT = "magamax:sidebar-menu-labels";
 
 export const DEFAULT_SIDEBAR_MENU_ORDER = NAV_SECTIONS.map((item) => item.path);
+export const DEFAULT_SIDEBAR_MENU_LABELS = Object.fromEntries(
+  NAV_SECTIONS.map((item) => [item.path, item.label]),
+);
 
 function isKnownPath(value: string): value is (typeof DEFAULT_SIDEBAR_MENU_ORDER)[number] {
   return DEFAULT_SIDEBAR_MENU_ORDER.includes(value as (typeof DEFAULT_SIDEBAR_MENU_ORDER)[number]);
@@ -26,6 +31,19 @@ export function normalizeSidebarMenuOrder(value: unknown): string[] {
   }
 
   return normalized;
+}
+
+export function normalizeSidebarMenuLabels(value: unknown): Record<string, string> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const labels: Record<string, string> = {};
+  for (const [path, label] of Object.entries(value)) {
+    if (!isKnownPath(path) || typeof label !== "string") continue;
+    const trimmed = label.trim().replace(/\s+/g, " ");
+    if (!trimmed) continue;
+    const defaultLabel = DEFAULT_SIDEBAR_MENU_LABELS[path];
+    if (trimmed !== defaultLabel) labels[path] = trimmed.slice(0, 48);
+  }
+  return labels;
 }
 
 export function readSidebarMenuOrder(): string[] {
@@ -65,6 +83,62 @@ export function resetSidebarMenuOrder(): string[] {
   return [...DEFAULT_SIDEBAR_MENU_ORDER];
 }
 
+export function readSidebarMenuLabels(): Record<string, string> {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = window.localStorage.getItem(SIDEBAR_MENU_LABELS_STORAGE_KEY);
+    return normalizeSidebarMenuLabels(raw ? JSON.parse(raw) : null);
+  } catch {
+    return {};
+  }
+}
+
+export function saveSidebarMenuLabels(labels: unknown): Record<string, string> {
+  const normalized = normalizeSidebarMenuLabels(labels);
+  if (typeof window !== "undefined") {
+    try {
+      if (Object.keys(normalized).length) {
+        window.localStorage.setItem(SIDEBAR_MENU_LABELS_STORAGE_KEY, JSON.stringify(normalized));
+      } else {
+        window.localStorage.removeItem(SIDEBAR_MENU_LABELS_STORAGE_KEY);
+      }
+    } catch {
+      // localStorage can be disabled; keep in-memory UI state working.
+    }
+    window.dispatchEvent(new CustomEvent(SIDEBAR_MENU_LABELS_EVENT, { detail: { labels: normalized } }));
+  }
+  return normalized;
+}
+
+export function resetSidebarMenuLabels(): Record<string, string> {
+  if (typeof window !== "undefined") {
+    try {
+      window.localStorage.removeItem(SIDEBAR_MENU_LABELS_STORAGE_KEY);
+    } catch {
+      // noop
+    }
+    window.dispatchEvent(new CustomEvent(SIDEBAR_MENU_LABELS_EVENT, { detail: { labels: {} } }));
+  }
+  return {};
+}
+
+export function renameSidebarMenuPath(
+  labels: unknown,
+  path: string,
+  label: string,
+): Record<string, string> {
+  const normalized = normalizeSidebarMenuLabels(labels);
+  if (!isKnownPath(path)) return normalized;
+  const trimmed = label.trim().replace(/\s+/g, " ").slice(0, 48);
+  const next = { ...normalized };
+  if (!trimmed || trimmed === DEFAULT_SIDEBAR_MENU_LABELS[path]) {
+    delete next[path];
+  } else {
+    next[path] = trimmed;
+  }
+  return normalizeSidebarMenuLabels(next);
+}
+
 export function moveSidebarMenuPath(order: unknown, activePath: string, targetPath: string): string[] {
   const normalized = normalizeSidebarMenuOrder(order);
   if (activePath === targetPath) return normalized;
@@ -85,6 +159,13 @@ export function orderNavItems<T extends { path: string }>(items: readonly T[], o
     const rightIndex = position.get(right.path) ?? Number.MAX_SAFE_INTEGER;
     return leftIndex - rightIndex;
   });
+}
+
+export function applyNavLabels<T extends { path: string; label: string }>(
+  items: readonly T[],
+  labels: Record<string, string>,
+): T[] {
+  return items.map((item) => ({ ...item, label: labels[item.path] ?? item.label }));
 }
 
 export function useSidebarMenuOrder() {
@@ -114,4 +195,37 @@ export function useSidebarMenuOrder() {
   }, []);
 
   return { order, setOrder, resetOrder };
+}
+
+export function useSidebarMenuLabels() {
+  const [labels, setLabelsState] = useState<Record<string, string>>(readSidebarMenuLabels);
+
+  useEffect(() => {
+    const syncFromStorage = () => setLabelsState(readSidebarMenuLabels());
+    const syncFromEvent = (event: Event) => {
+      const customEvent = event as CustomEvent<{ labels?: unknown }>;
+      setLabelsState(normalizeSidebarMenuLabels(customEvent.detail?.labels));
+    };
+
+    window.addEventListener("storage", syncFromStorage);
+    window.addEventListener(SIDEBAR_MENU_LABELS_EVENT, syncFromEvent);
+    return () => {
+      window.removeEventListener("storage", syncFromStorage);
+      window.removeEventListener(SIDEBAR_MENU_LABELS_EVENT, syncFromEvent);
+    };
+  }, []);
+
+  const setLabels = useCallback((nextLabels: unknown) => {
+    setLabelsState(saveSidebarMenuLabels(nextLabels));
+  }, []);
+
+  const renamePath = useCallback((path: string, label: string) => {
+    setLabelsState((current) => saveSidebarMenuLabels(renameSidebarMenuPath(current, path, label)));
+  }, []);
+
+  const resetLabels = useCallback(() => {
+    setLabelsState(resetSidebarMenuLabels());
+  }, []);
+
+  return { labels, setLabels, renamePath, resetLabels };
 }

@@ -324,6 +324,21 @@ describe("AiConsolePage", () => {
     expect(screen.getByText("SKU")).toBeInTheDocument();
   });
 
+  it("shows branded rotating generation indicator while answer is pending", async () => {
+    mockBaseQueries();
+    useAssistantSessionsQuery.mockReturnValue({ data: [], error: null });
+    useAssistantMessagesQuery.mockReturnValue({ data: [], error: null });
+    useCreateAssistantSessionMutation.mockReturnValue({ mutateAsync: vi.fn(), isPending: false });
+    useUpdateAssistantSessionMutation.mockReturnValue({ mutateAsync: vi.fn(), isPending: false, error: null });
+    useDeleteAssistantSessionMutation.mockReturnValue({ mutateAsync: vi.fn(), isPending: false, error: null });
+    useAssistantMessageMutation.mockReturnValue({ mutateAsync: vi.fn(), isPending: true, error: null });
+
+    renderWithProviders(<AiConsolePage />, "/ai");
+
+    expect(await screen.findByRole("status")).toHaveTextContent("Формирую ответ");
+    expect(screen.getByRole("status")).toHaveTextContent("MAGAMAX AI");
+  });
+
   it("renames and deletes a session from hover rail actions", async () => {
     mockBaseQueries();
     const updateMutateAsync = vi.fn().mockResolvedValue({});

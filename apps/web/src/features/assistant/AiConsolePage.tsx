@@ -194,6 +194,20 @@ function MagamaxAssistantIcon({ className }: { className?: string }) {
   );
 }
 
+function MagamaxGeneratingIndicator() {
+  return (
+    <div
+      className="relative mt-1 flex h-10 w-10 shrink-0 items-center justify-center"
+      aria-hidden="true"
+    >
+      <span className="absolute inset-0 rounded-full border border-brand/20 bg-brand/10 shadow-[0_0_34px_rgba(255,106,28,0.22)]" />
+      <span className="absolute inset-1 rounded-full border border-brand/25" />
+      <span className="absolute inset-2 rounded-full bg-surface-panel/80" />
+      <MagamaxAssistantIcon className="relative h-5 w-5 animate-spin [animation-duration:3.2s] [animation-timing-function:cubic-bezier(0.55,0,0.25,1)] motion-reduce:animate-none" />
+    </div>
+  );
+}
+
 function useTypewriterCursor(totalChars: number, active: boolean, onDone?: () => void) {
   const [visibleChars, setVisibleChars] = useState(active ? 0 : totalChars);
   const onDoneRef = useRef(onDone);
@@ -758,6 +772,7 @@ export default function AiConsolePage() {
     messageMutation.isPending ||
     updateSessionMutation.isPending ||
     deleteSessionMutation.isPending;
+  const isGeneratingAnswer = createSessionMutation.isPending || messageMutation.isPending;
 
   const sessions = useMemo(
     () => (sessionsQuery.data ?? []).filter((item) => !deletedSessionIds.has(item.id)),
@@ -1119,13 +1134,16 @@ export default function AiConsolePage() {
                 )}
               </div>
 
-              {isPending ? (
-                <div className="flex gap-4 py-7">
-                  <div className="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-brand/30 bg-brand/15 text-brand">
-                    <MagamaxAssistantIcon className="h-4 w-4" />
-                  </div>
-                  <div className="rounded-2xl border border-line-subtle bg-surface-muted/35 px-5 py-3 text-sm text-ink-muted">
-                    Формирую ответ. Если вопрос требует данных, подключаю нужные инструменты…
+              {isGeneratingAnswer ? (
+                <div className="flex gap-4 py-7" role="status" aria-live="polite">
+                  <MagamaxGeneratingIndicator />
+                  <div className="rounded-2xl border border-line-subtle bg-surface-muted/35 px-5 py-3 text-sm text-ink-muted shadow-[0_18px_55px_rgba(0,0,0,0.18)]">
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-muted">
+                      MAGAMAX AI
+                    </div>
+                    <div className="mt-1">
+                      Формирую ответ. Если вопрос требует данных, подключаю нужные инструменты…
+                    </div>
                   </div>
                 </div>
               ) : null}

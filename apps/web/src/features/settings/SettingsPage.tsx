@@ -8,8 +8,12 @@ import { useCurrentUserQuery, useLogoutAction } from "@/hooks/queries/use-auth";
 import { NAV_SECTIONS } from "@/lib/constants";
 import { hasCapability } from "@/lib/access";
 import {
+  DEFAULT_SIDEBAR_MENU_LABELS,
+  applyNavLabels,
   moveSidebarMenuPath,
   orderNavItems,
+  renameSidebarMenuPath,
+  useSidebarMenuLabels,
   useSidebarMenuOrder,
 } from "@/lib/navigation-preferences";
 import {
@@ -52,9 +56,13 @@ export default function SettingsPage() {
   const { data: currentUser } = useCurrentUserQuery();
   const logout = useLogoutAction();
   const { order, setOrder, resetOrder } = useSidebarMenuOrder();
-  const menuItems = orderNavItems(
-    NAV_SECTIONS.filter((item) => !currentUser || !item.capability || hasCapability(currentUser, item.capability)),
-    order,
+  const { labels, setLabels, resetLabels } = useSidebarMenuLabels();
+  const menuItems = applyNavLabels(
+    orderNavItems(
+      NAV_SECTIONS.filter((item) => !currentUser || !item.capability || hasCapability(currentUser, item.capability)),
+      order,
+    ),
+    labels,
   );
 
   const handleDragStart = (event: DragEvent<HTMLDivElement>, path: string) => {
@@ -189,11 +197,40 @@ export default function SettingsPage() {
                     {index + 1}
                   </span>
                   <Icon className="h-4 w-4 shrink-0 text-brand" />
-                  <span className="min-w-0 flex-1 truncate text-sm font-medium text-ink">{item.label}</span>
+                  <div className="min-w-0 flex-1 space-y-1">
+                    <label className="sr-only" htmlFor={`menu-label-${item.path.replace(/\W+/g, "-")}`}>
+                      Название пункта меню {DEFAULT_SIDEBAR_MENU_LABELS[item.path]}
+                    </label>
+                    <input
+                      id={`menu-label-${item.path.replace(/\W+/g, "-")}`}
+                      value={item.label}
+                      maxLength={48}
+                      onChange={(event) =>
+                        setLabels(renameSidebarMenuPath(labels, item.path, event.target.value))
+                      }
+                      onClick={(event) => event.stopPropagation()}
+                      onDragStart={(event) => event.preventDefault()}
+                      className="h-8 w-full rounded-lg border border-transparent bg-surface-panel/60 px-2 text-sm font-medium text-ink outline-none transition focus:border-brand/50 focus:bg-surface-panel"
+                    />
+                    <div className="truncate px-2 text-[10px] uppercase tracking-[0.12em] text-ink-muted">
+                      {item.path}
+                    </div>
+                  </div>
                   <GripVertical className="h-4 w-4 shrink-0 text-ink-muted opacity-60 transition group-hover:opacity-100" />
                 </div>
               );
             })}
+          </div>
+          <div className="flex justify-end">
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="text-ink-muted hover:text-ink"
+              onClick={resetLabels}
+            >
+              Сбросить названия
+            </Button>
           </div>
         </div>
       </section>
