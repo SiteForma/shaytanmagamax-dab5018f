@@ -64,6 +64,7 @@ function buildContext(
 }
 
 const ASSISTANT_COLUMN_LABELS: Record<string, string> = {
+  rank: "Место",
   article: "Артикул",
   clientName: "Клиент",
   productName: "Товар",
@@ -81,16 +82,25 @@ const ASSISTANT_COLUMN_LABELS: Record<string, string> = {
   source: "Источник",
   share: "Доля",
   sheetName: "Лист",
+  dimension: "Измерение",
   dimensionName: "Измерение",
   metricName: "Показатель",
+  year: "Год",
   metricYear: "Год",
   metricValue: "Значение",
+  estimatedProfit: "Расчётная прибыль",
+  estimatedProfitRub: "Расчётная прибыль",
+  revenue: "Выручка",
+  profitability: "Рентабельность",
+  profitabilityPct: "Рентабельность",
+  profitability_pct: "Рентабельность",
 };
 
 function formatMetricName(value: string) {
   return (
     {
       revenue: "Выручка",
+      profitability: "Рентабельность",
       profitability_pct: "Рентабельность",
       growth_rate: "Рост / падение",
       distribution_share: "Доля",

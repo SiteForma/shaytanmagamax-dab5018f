@@ -137,6 +137,24 @@ describe("AiConsolePage", () => {
                 rows: [],
                 items: [],
               },
+              {
+                id: "sec_2",
+                type: "reserve_table_preview",
+                title: "Таблица",
+                body: null,
+                metrics: [],
+                rows: [
+                  {
+                    rank: 1,
+                    dimensionName: "08. Системы выдвижения",
+                    estimatedProfit: "71,4 млн ₽",
+                    revenue: "120 млн ₽",
+                    profitability: "65%",
+                    metricYear: 2025,
+                  },
+                ],
+                items: [],
+              },
             ],
             sourceRefs: [
               {
@@ -184,6 +202,16 @@ describe("AiConsolePage", () => {
     fireEvent.click(screen.getByRole("button", { name: /подробнее/i }));
 
     expect(await screen.findByRole("heading", { name: "Подробнее" })).toBeInTheDocument();
+    expect(screen.getByText("Место")).toBeInTheDocument();
+    expect(screen.getByText("Измерение")).toBeInTheDocument();
+    expect(screen.getByText("Расчётная прибыль")).toBeInTheDocument();
+    expect(screen.getByText("Выручка")).toBeInTheDocument();
+    expect(screen.getByText("Рентабельность")).toBeInTheDocument();
+    expect(screen.getByText("Год")).toBeInTheDocument();
+    expect(screen.queryByText("rank")).not.toBeInTheDocument();
+    expect(screen.queryByText("estimatedProfit")).not.toBeInTheDocument();
+    expect(screen.queryByText("revenue")).not.toBeInTheDocument();
+    expect(screen.queryByText("profitability")).not.toBeInTheDocument();
     expect(screen.getAllByText("Reserve Run run_1").length).toBeGreaterThanOrEqual(2);
     expect(screen.getByText("Трассировка и вызовы инструментов")).toBeInTheDocument();
     expect(screen.getByText("calculate_reserve")).toBeInTheDocument();

@@ -2,7 +2,7 @@ import type { ApiErrorEnvelope } from "../../../../../packages/shared-contracts/
 import { DEV_USER_ID } from "@/lib/auth/config";
 import { getStoredSession } from "@/lib/api/session";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8001/api";
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "/api").replace(/\/$/, "");
 
 export class ApiError extends Error {
   code: string;
@@ -50,6 +50,34 @@ function buildRequestId() {
   return `req_${Date.now()}`;
 }
 
+function toNetworkApiError(error: unknown, requestId: string) {
+  if (error instanceof ApiError) {
+    return error;
+  }
+  if (error instanceof DOMException && error.name === "AbortError") {
+    return new ApiError({
+      code: "request_aborted",
+      message: "Запрос отменён.",
+      request_id: requestId,
+      status: 0,
+    });
+  }
+  return new ApiError({
+    code: "network_error",
+    message: "API MAGAMAX недоступен. Проверьте, что backend запущен, и повторите запрос.",
+    request_id: requestId,
+    status: 0,
+  });
+}
+
+async function fetchApi(path: string, init: RequestInit, requestId: string) {
+  try {
+    return await fetch(`${API_BASE_URL}${path}`, init);
+  } catch (error) {
+    throw toNetworkApiError(error, requestId);
+  }
+}
+
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const headers = new Headers(options.headers);
   const requestId = buildRequestId();
@@ -62,12 +90,12 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
       headers.set("X-Dev-User", DEV_USER_ID);
     }
   }
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const response = await fetchApi(path, {
     method: options.method ?? "GET",
     body: options.body,
     headers,
     signal: options.signal,
-  });
+  }, requestId);
   const responseRequestId = response.headers.get("x-request-id") ?? requestId;
   if (!response.ok) {
     const payload = (await response.json().catch(() => null)) as ApiErrorEnvelope | null;
@@ -105,11 +133,11 @@ async function download(path: string, options: Omit<RequestOptions, "body"> = {}
       headers.set("X-Dev-User", DEV_USER_ID);
     }
   }
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const response = await fetchApi(path, {
     method: options.method ?? "GET",
     headers,
     signal: options.signal,
-  });
+  }, requestId);
   const responseRequestId = response.headers.get("x-request-id") ?? requestId;
   if (!response.ok) {
     const payload = (await response.json().catch(() => null)) as ApiErrorEnvelope | null;
@@ -193,12 +221,12 @@ async function streamServerEvents<TEvent>(
     }
   }
 
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const response = await fetchApi(path, {
     method: options.method ?? "POST",
     body: options.body === undefined ? undefined : JSON.stringify(options.body),
     headers,
     signal: options.signal,
-  });
+  }, requestId);
   const responseRequestId = response.headers.get("x-request-id") ?? requestId;
   if (!response.ok) {
     const payload = (await response.json().catch(() => null)) as ApiErrorEnvelope | null;
