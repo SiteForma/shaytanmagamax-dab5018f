@@ -314,6 +314,8 @@ def seed_reference_data(db: Session, settings: Settings) -> None:
         ("diy_clients", "Мастер DIY-клиентов"),
         ("category_structure", "Структура категорий"),
         ("inbound", "План поставок"),
+        ("management_report", "Управленческий отчёт"),
+        ("sku_costs", "Справочник себестоимости"),
         ("raw_report", "Неразобранный отчёт"),
     ]
     source_type_labels = {code: name for code, name in source_types}

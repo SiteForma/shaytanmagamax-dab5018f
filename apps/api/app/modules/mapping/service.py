@@ -226,6 +226,15 @@ SOURCE_TYPE_SPECS: dict[str, SourceTypeSpec] = {
         },
         supports_apply=False,
     ),
+    "management_report": SourceTypeSpec(
+        canonical_fields=("source_row_id", "raw_value"),
+        required_fields=(),
+        synonyms={
+            "source_row_id": ("row", "source row", "строка"),
+            "raw_value": ("value", "metric", "значение", "метрика"),
+        },
+        supports_apply=False,
+    ),
     "raw_report": SourceTypeSpec(
         canonical_fields=("source_row_id", "raw_value"),
         required_fields=(),

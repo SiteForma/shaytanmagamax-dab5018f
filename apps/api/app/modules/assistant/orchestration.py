@@ -19,6 +19,7 @@ from apps.api.app.modules.assistant.domain import (
     AssistantToolExecution,
     AssistantWarningData,
 )
+from apps.api.app.modules.assistant.insights import build_ranking_insights
 from apps.api.app.modules.assistant.periods import parse_period_text, previous_month_period
 from apps.api.app.modules.assistant.permissions import require_assistant_tool_capabilities
 from apps.api.app.modules.assistant.providers import (
@@ -46,6 +47,8 @@ from apps.api.app.modules.assistant.state import (
     merge_state,
     resolve_followup_from_state,
 )
+
+MAX_TOOL_CALLS_PER_REQUEST = 3
 
 
 def _qty(value: float | int | None) -> str:
@@ -247,6 +250,21 @@ def _dimensions_from_question(question: str) -> list[str]:
     return list(dict.fromkeys(dimensions))
 
 
+def _is_analytics_overview_question(question: str) -> bool:
+    q = question.lower()
+    has_year = bool(re.search(r"\b20\d{2}\b", q)) or "год" in q
+    overview_tokens = (
+        "как в целом",
+        "как закрыли",
+        "закрыли",
+        "итоги",
+        "что по",
+        "результат",
+        "за год",
+    )
+    return has_year and any(token in q for token in overview_tokens)
+
+
 def _params_from_route(
     *,
     question: str,
@@ -317,11 +335,20 @@ def _params_from_route(
     if bundle.route.intent == "analytics_slice":
         parsed = parse_period_text(question, default_year=_default_year_from_params(params))
         if not params.get("period") and parsed.date_from and parsed.date_to:
-            params["period"] = {"date_from": parsed.date_from, "date_to": parsed.date_to}
+            params["period"] = {
+                "date_from": parsed.date_from,
+                "date_to": parsed.date_to,
+                "granularity": parsed.granularity,
+                "label": parsed.label,
+                "year_source": parsed.year_source,
+            }
             params.setdefault("date_from", parsed.date_from)
             params.setdefault("date_to", parsed.date_to)
+            if parsed.year_source:
+                params.setdefault("year_source", parsed.year_source)
         elif not params.get("period") and params.get("date_from") and params.get("date_to"):
             params["period"] = {"date_from": params["date_from"], "date_to": params["date_to"]}
+        params.setdefault("question", question)
         metrics = _metrics_from_question(question)
         if metrics:
             params.setdefault("metrics", metrics)
@@ -342,7 +369,10 @@ def _params_from_route(
                 else "sales"
             )
             if metric_source == "sales":
-                params.setdefault("dimensions", [] if params.get("client_id") else ["client"])
+                params.setdefault(
+                    "dimensions",
+                    [] if params.get("client_id") or _is_analytics_overview_question(question) else ["client"],
+                )
             elif metric_source == "stock":
                 params.setdefault("dimensions", ["sku", "article"])
             elif metric_source == "reserve":
@@ -357,7 +387,14 @@ def _params_from_route(
             params["limit"] = 20
         if "падени" in question.lower() or "просел" in question.lower():
             params.setdefault("sort_direction", "asc")
-    return {key: value for key, value in params.items() if value not in (None, "", [])}
+    cleaned: dict[str, object] = {}
+    for key, value in params.items():
+        if value in (None, ""):
+            continue
+        if value == [] and key != "dimensions":
+            continue
+        cleaned[key] = value
+    return cleaned
 
 
 def _clarification_chips(missing_fields: list[AssistantMissingField]) -> list[str]:
@@ -1551,19 +1588,37 @@ def _compose_answer(
         totals = payload.get("totals") if isinstance(payload, dict) else {}
         if not isinstance(totals, dict):
             totals = {}
-        if isinstance(payload, dict) and payload.get("status") == "unsupported":
+        if isinstance(payload, dict) and payload.get("warning_code") in {
+            "unsupported_metric",
+            "unsupported_dimension",
+            "cross_source_slice_not_supported",
+        }:
             supported_metrics = ", ".join(payload.get("supported_metrics") or [])
             supported_dimensions = ", ".join(payload.get("supported_dimensions") or [])
+            unsupported_metrics = ", ".join(payload.get("unsupported_metrics") or [])
+            unsupported_dimensions = ", ".join(payload.get("unsupported_dimensions") or [])
             sections = [
                 _section(
                     section_type="warning_block",
-                    title="Срез пока не поддерживается",
+                    title="Нужно выбрать поддерживаемый срез",
                     items=[
+                        (
+                            f"Метрика недоступна: {unsupported_metrics}"
+                            if unsupported_metrics
+                            else ""
+                        ),
+                        (
+                            f"Срез недоступен: {unsupported_dimensions}"
+                            if unsupported_dimensions
+                            else ""
+                        ),
                         f"Доступные метрики: {supported_metrics}",
                         f"Доступные измерения: {supported_dimensions}",
                     ],
                 )
             ]
+            for section in sections:
+                section["items"] = [item for item in section["items"] if item]
             return AssistantAnswerDraft(
                 intent="analytics_slice",
                 status="needs_clarification",
@@ -1596,6 +1651,26 @@ def _compose_answer(
         primary_unit = (
             METRIC_CATALOG.get(primary_metric).unit if primary_metric in METRIC_CATALOG else "qty"
         )
+        available_range = payload.get("available_date_range") if isinstance(payload, dict) else None
+        query_plan = payload.get("query_plan") if isinstance(payload, dict) else None
+        chart_spec = payload.get("chart_spec") if isinstance(payload, dict) else None
+        overview_breakdowns = (
+            payload.get("overview_breakdowns") if isinstance(payload, dict) else []
+        )
+        if not isinstance(overview_breakdowns, list):
+            overview_breakdowns = []
+        no_data_items: list[str] = []
+        if isinstance(query_plan, dict):
+            no_data_items.append(
+                "План запроса: "
+                f"метрики {', '.join(map(str, query_plan.get('metrics') or []))}; "
+                f"срез {', '.join(map(str, query_plan.get('dimensions') or [])) or 'итого'}; "
+                f"период {query_plan.get('date_from') or '—'} — {query_plan.get('date_to') or '—'}."
+            )
+        if isinstance(available_range, dict):
+            no_data_items.append(
+                f"Доступный диапазон по источнику: {available_range.get('label') or 'не определён'}."
+            )
         metric_cards = [
             _metric(
                 str(metric),
@@ -1618,6 +1693,14 @@ def _compose_answer(
             )
             for metric in metrics
         ]
+        insight_items = [
+            insight.explanation
+            for insight in build_ranking_insights(
+                rows if all(isinstance(row, dict) for row in rows) else [],
+                metric=primary_metric,
+                dimension_key=str(dimensions[0]) if dimensions else primary_metric,
+            )
+        ]
         sections = [
             _section(
                 section_type="narrative",
@@ -1635,14 +1718,49 @@ def _compose_answer(
                 metrics=metric_cards,
             ),
             _section(
+                section_type="source_list",
+                title="Инсайты",
+                items=insight_items or ["Инсайты не строились: по выбранному срезу нет строк."],
+            ),
+            _section(
                 section_type="reserve_table_preview",
-                title="Топ строк",
+                title="Данные среза",
                 rows=rows[:8],
             ),
         ]
+        for breakdown in overview_breakdowns:
+            if not isinstance(breakdown, dict):
+                continue
+            breakdown_rows = breakdown.get("rows")
+            if not isinstance(breakdown_rows, list) or not breakdown_rows:
+                continue
+            sections.append(
+                _section(
+                    section_type="reserve_table_preview",
+                    title=f"Разбивка: {breakdown.get('label') or breakdown.get('dimension')}",
+                    rows=breakdown_rows[:8],
+                )
+            )
+        if isinstance(chart_spec, dict):
+            sections.append(
+                _section(
+                    section_type="source_list",
+                    title="Chart spec",
+                    rows=[chart_spec],
+                )
+            )
+        if not rows and no_data_items:
+            sections.append(
+                _section(
+                    section_type="warning_block",
+                    title="Данных по срезу нет",
+                    items=no_data_items,
+                )
+            )
+        response_status = "completed" if rows else "no_data"
         return AssistantAnswerDraft(
             intent="analytics_slice",
-            status="completed" if rows else "partial",
+            status=response_status,
             confidence=0.86 if rows else 0.58,
             title="Аналитический срез",
             summary=sections[0]["body"] or "",
@@ -2296,7 +2414,7 @@ def _execution_plan(
     for tool_name in planned_tool_names:
         if tool_name in allowed and tool_name not in plan:
             plan.append(tool_name)
-    return plan
+    return plan[:MAX_TOOL_CALLS_PER_REQUEST]
 
 
 def execute_assistant_query(

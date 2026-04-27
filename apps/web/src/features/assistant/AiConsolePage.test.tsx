@@ -213,8 +213,8 @@ describe("AiConsolePage", () => {
     expect(screen.queryByText("revenue")).not.toBeInTheDocument();
     expect(screen.queryByText("profitability")).not.toBeInTheDocument();
     expect(screen.getAllByText("Reserve Run run_1").length).toBeGreaterThanOrEqual(2);
-    expect(screen.getByText("Трассировка и вызовы инструментов")).toBeInTheDocument();
-    expect(screen.getByText("calculate_reserve")).toBeInTheDocument();
+    expect(screen.queryByText("Трассировка и вызовы инструментов")).not.toBeInTheDocument();
+    expect(screen.queryByText("calculate_reserve")).not.toBeInTheDocument();
     fireEvent.click(screen.getByText("Показать critical"));
     await waitFor(() =>
       expect(mutateAsync).toHaveBeenCalledWith(expect.objectContaining({
@@ -222,6 +222,224 @@ describe("AiConsolePage", () => {
         payload: expect.objectContaining({ text: "Покажи critical" }),
       })),
     );
+  });
+
+  it("renders analytics sections inline without debug tool traces", async () => {
+    mockBaseQueries();
+    useAssistantSessionsQuery.mockReturnValue({
+      data: [
+        {
+          id: "asess_analytics",
+          title: "Аналитика",
+          status: "active",
+          createdAt: "2026-04-23T10:00:00Z",
+          updatedAt: "2026-04-23T10:00:00Z",
+          lastMessageAt: "2026-04-23T10:05:00Z",
+          messageCount: 2,
+          pinnedContext: {},
+          lastIntent: "analytics_slice",
+          preferredMode: "deterministic",
+          provider: "deterministic",
+        },
+      ],
+      error: null,
+    });
+    useAssistantMessagesQuery.mockReturnValue({
+      data: [
+        {
+          id: "msg_analytics",
+          sessionId: "asess_analytics",
+          role: "assistant",
+          text: "За 2099 год данных нет.",
+          createdAt: "2026-04-23T10:02:00Z",
+          status: "no_data",
+          context: {},
+          response: {
+            answerId: "ans_analytics",
+            sessionId: "asess_analytics",
+            intent: "analytics_slice",
+            status: "no_data",
+            confidence: 0.58,
+            title: "Аналитический срез",
+            summary: "По выбранному срезу данных не найдено.",
+            sections: [
+              {
+                id: "metrics",
+                type: "metric_summary",
+                title: "Итого",
+                body: null,
+                metrics: [{ key: "revenue", label: "Выручка", value: "0 ₽", tone: "neutral" }],
+                rows: [],
+                items: [],
+              },
+              {
+                id: "insights",
+                type: "source_list",
+                title: "Инсайты",
+                body: null,
+                metrics: [],
+                rows: [],
+                items: ["Инсайты не строились: по выбранному срезу нет строк."],
+              },
+              {
+                id: "rows",
+                type: "reserve_table_preview",
+                title: "Данные среза",
+                body: null,
+                metrics: [],
+                rows: [{ client: "OBI", revenue: 0 }],
+                items: [],
+              },
+              {
+                id: "chart",
+                type: "source_list",
+                title: "Chart spec",
+                body: null,
+                metrics: [],
+                rows: [{ type: "table", title: "Нет данных для графика", series: [], render: false }],
+                items: [],
+              },
+              {
+                id: "warning",
+                type: "warning_block",
+                title: "Данных по срезу нет",
+                body: null,
+                metrics: [],
+                rows: [],
+                items: ["Доступный диапазон по источнику: 2023–2025."],
+              },
+            ],
+            sourceRefs: [
+              {
+                sourceType: "sales",
+                sourceLabel: "Sales facts",
+                entityType: "sales_fact",
+                role: "primary",
+                route: "/sales",
+                detail: "0 агрегированных строк",
+              },
+            ],
+            toolCalls: [
+              {
+                toolName: "get_analytics_slice",
+                status: "completed",
+                arguments: { metrics: ["revenue"], date_from: "2099-01-01" },
+                summary: "Аналитический срез sales: 0 строк",
+                latencyMs: 11,
+              },
+            ],
+            followups: [],
+            warnings: [{ code: "unavailable_period", message: "По выбранному периоду данных не найдено.", severity: "warning" }],
+            createdAt: "2026-04-23T10:02:00Z",
+            provider: "deterministic",
+            traceId: "trace_analytics",
+            contextUsed: {},
+          },
+        },
+      ],
+      error: null,
+    });
+    useCreateAssistantSessionMutation.mockReturnValue({ mutateAsync: vi.fn(), isPending: false });
+    useUpdateAssistantSessionMutation.mockReturnValue({ mutateAsync: vi.fn(), isPending: false, error: null });
+    useDeleteAssistantSessionMutation.mockReturnValue({ mutateAsync: vi.fn(), isPending: false, error: null });
+    useAssistantMessageMutation.mockReturnValue({ mutateAsync: vi.fn(), isPending: false, error: null });
+
+    renderWithProviders(<AiConsolePage />, "/ai?session=asess_analytics");
+
+    expect(await screen.findByText("По выбранному срезу данных не найдено.")).toBeInTheDocument();
+    expect(screen.getByText("Итого")).toBeInTheDocument();
+    expect(screen.getAllByText("Выручка").length).toBeGreaterThan(0);
+    expect(screen.getByText("Данные среза")).toBeInTheDocument();
+    expect(screen.getByText("График не строится: нет достаточных данных для визуализации.")).toBeInTheDocument();
+    expect(screen.getByText("Доступный диапазон по источнику: 2023–2025.")).toBeInTheDocument();
+    expect(screen.getByText("Sales facts")).toBeInTheDocument();
+    expect(screen.queryByText("get_analytics_slice")).not.toBeInTheDocument();
+  });
+
+  it("renders chart spec as a real chart container when render is enabled", async () => {
+    mockBaseQueries();
+    useAssistantSessionsQuery.mockReturnValue({
+      data: [
+        {
+          id: "asess_chart",
+          title: "График",
+          status: "active",
+          createdAt: "2026-04-23T10:00:00Z",
+          updatedAt: "2026-04-23T10:00:00Z",
+          lastMessageAt: "2026-04-23T10:05:00Z",
+          messageCount: 1,
+          pinnedContext: {},
+          lastIntent: "analytics_slice",
+          preferredMode: "deterministic",
+          provider: "deterministic",
+        },
+      ],
+      error: null,
+    });
+    useAssistantMessagesQuery.mockReturnValue({
+      data: [
+        {
+          id: "msg_chart",
+          sessionId: "asess_chart",
+          role: "assistant",
+          text: "Выручка по клиентам.",
+          createdAt: "2026-04-23T10:02:00Z",
+          status: "completed",
+          context: {},
+          response: {
+            answerId: "ans_chart",
+            sessionId: "asess_chart",
+            intent: "analytics_slice",
+            status: "completed",
+            confidence: 0.86,
+            title: "Аналитический срез",
+            summary: "По срезу получено 2 строки.",
+            sections: [
+              {
+                id: "chart",
+                type: "source_list",
+                title: "Chart spec",
+                body: null,
+                metrics: [],
+                rows: [
+                  {
+                    type: "bar",
+                    title: "Выручка по клиентам",
+                    x: "client",
+                    y: "revenue",
+                    series: [
+                      { client: "OBI", revenue: 120 },
+                      { client: "Леруа", revenue: 95 },
+                    ],
+                    render: true,
+                  },
+                ],
+                items: [],
+              },
+            ],
+            sourceRefs: [],
+            toolCalls: [],
+            followups: [],
+            warnings: [],
+            createdAt: "2026-04-23T10:02:00Z",
+            provider: "deterministic",
+            traceId: "trace_chart",
+            contextUsed: {},
+          },
+        },
+      ],
+      error: null,
+    });
+    useCreateAssistantSessionMutation.mockReturnValue({ mutateAsync: vi.fn(), isPending: false });
+    useUpdateAssistantSessionMutation.mockReturnValue({ mutateAsync: vi.fn(), isPending: false, error: null });
+    useDeleteAssistantSessionMutation.mockReturnValue({ mutateAsync: vi.fn(), isPending: false, error: null });
+    useAssistantMessageMutation.mockReturnValue({ mutateAsync: vi.fn(), isPending: false, error: null });
+
+    renderWithProviders(<AiConsolePage />, "/ai?session=asess_chart");
+
+    expect(await screen.findByText("Выручка по клиентам")).toBeInTheDocument();
+    expect(screen.getByText("Тип: bar · точек: 2")).toBeInTheDocument();
+    expect(screen.queryByText("График не строится: нет достаточных данных для визуализации.")).not.toBeInTheDocument();
   });
 
   it("hides generic free-chat heading and shows MAGAMAX AI label", async () => {

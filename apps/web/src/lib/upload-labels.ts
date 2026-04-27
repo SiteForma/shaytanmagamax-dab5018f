@@ -7,6 +7,7 @@ export const SOURCE_TYPE_LABELS: Record<UploadJob["sourceType"], string> = {
   category_structure: "структура категорий",
   inbound: "поставки",
   sku_costs: "себестоимость",
+  management_report: "управленческий отчёт",
   raw_report: "сырой отчёт",
 };
 

@@ -7,6 +7,10 @@ from sqlalchemy.orm import Session
 from apps.api.app.db.models import ReserveRun, SalesFact, Sku, SkuCost
 from apps.api.app.modules.assistant.context import build_context_bundle
 from apps.api.app.modules.assistant.domain import AssistantContextBundle
+from apps.api.app.modules.assistant.orchestration import (
+    MAX_TOOL_CALLS_PER_REQUEST,
+    _execution_plan,
+)
 from apps.api.app.modules.assistant.routing import route_question
 from apps.api.app.modules.assistant.schemas import AssistantPinnedContext
 from apps.api.app.modules.assistant.tools import tool_get_analytics_slice
@@ -47,6 +51,8 @@ def test_sales_revenue_by_client_month_matches_db(db_session: Session) -> None:
     assert execution.payload["rows"][0]["sales_qty"] == float(expected_qty)
     assert execution.payload["rows"][0]["revenue"] == float(expected_revenue)
     assert execution.payload["source"] == "sales"
+    assert execution.payload["query_plan"]["date_from"] == "2025-03-01"
+    assert execution.payload["query_plan"]["metrics"] == ["revenue", "sales_qty"]
     assert execution.source_refs[0]["sourceType"] == "sales"
 
 
@@ -85,6 +91,59 @@ def test_top_sku_by_revenue_is_sorted(db_session: Session) -> None:
     revenues = [row["revenue"] for row in execution.payload["rows"]]
     assert revenues == sorted(revenues, reverse=True)
     assert len(revenues) <= 20
+
+
+def test_year_overview_keeps_total_slice_and_adds_breakdowns(db_session: Session) -> None:
+    execution = tool_get_analytics_slice(
+        db_session,
+        _bundle(db_session, "как в целом 2025 год закрыли?"),
+        {
+            "metrics": ["revenue", "sales_qty"],
+            "dimensions": [],
+            "date_from": "2025-01-01",
+            "date_to": "2025-12-31",
+            "question": "как в целом 2025 год закрыли?",
+        },
+    )
+
+    payload = execution.payload
+    assert payload["status"] == "completed"
+    assert payload["dimensions"] == []
+    assert payload["query_plan"]["dimensions"] == []
+    assert payload["query_plan"]["year_source"] == "explicit"
+    assert payload["rows"]
+    assert "client" not in payload["rows"][0]
+    assert {item["dimension"] for item in payload["overview_breakdowns"]} == {
+        "client",
+        "category",
+    }
+
+
+def test_query_plan_marks_direct_date_range_as_explicit_year(db_session: Session) -> None:
+    execution = tool_get_analytics_slice(
+        db_session,
+        _bundle(db_session, "Покажи продажи"),
+        {
+            "metrics": ["revenue"],
+            "dimensions": ["client"],
+            "date_from": "2025-01-01",
+            "date_to": "2025-12-31",
+        },
+    )
+
+    assert execution.payload["query_plan"]["year_source"] == "explicit"
+
+
+def test_execution_plan_is_capped_to_three_tools() -> None:
+    plan = _execution_plan(
+        "reserve_calculation",
+        ["get_dashboard_summary"],
+        "пересчитай резерв по OBI",
+        {"_force_tool": "calculate_reserve"},
+    )
+
+    assert len(plan) == MAX_TOOL_CALLS_PER_REQUEST
+    assert "get_dashboard_summary" not in plan
 
 
 def test_sales_profit_metrics_use_sku_cost_reference(db_session: Session) -> None:
@@ -176,8 +235,43 @@ def test_analytics_slice_rejects_unknown_metric_dimension_and_sql(db_session: Se
         },
     )
 
-    assert unsupported.payload["status"] == "unsupported"
+    assert unsupported.payload["status"] == "needs_clarification"
     assert "unknown_metric" in unsupported.payload["unsupported_metrics"]
+
+
+def test_analytics_slice_rejects_unknown_metric_as_clarification(db_session: Session) -> None:
+    execution = tool_get_analytics_slice(
+        db_session,
+        _bundle(db_session, "срез"),
+        {
+            "metrics": ["unknown_metric"],
+            "dimensions": ["client"],
+            "date_from": "2025-01-01",
+            "date_to": "2025-12-31",
+        },
+    )
+
+    assert execution.payload["status"] == "needs_clarification"
+    assert execution.payload["warning_code"] == "unsupported_metric"
+    assert "revenue" in execution.payload["supported_metrics"]
+
+
+def test_analytics_slice_no_data_includes_available_date_range(db_session: Session) -> None:
+    execution = tool_get_analytics_slice(
+        db_session,
+        _bundle(db_session, "Покажи продажи за 2019 год"),
+        {
+            "metrics": ["revenue", "sales_qty"],
+            "dimensions": ["client"],
+            "date_from": "2019-01-01",
+            "date_to": "2019-12-31",
+        },
+    )
+
+    assert execution.payload["status"] == "no_data"
+    assert execution.payload["available_date_range"]["min_year"] <= 2025
+    assert "unavailable_period" in execution.payload["warning_codes"]
+    assert execution.payload["query_plan"]["date_from"] == "2019-01-01"
 
 
 def test_assistant_sales_followups_use_analytics_slice(client: TestClient) -> None:

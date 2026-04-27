@@ -1347,6 +1347,117 @@ def _period_filter(params: dict[str, object]) -> tuple[date | None, date | None]
     return _parse_date(date_from), _parse_date(date_to)
 
 
+def _available_date_range(db: Session, source: str) -> dict[str, object] | None:
+    min_date: object | None
+    max_date: object | None
+    if source == "sales":
+        min_date, max_date = db.execute(
+            select(func.min(SalesFact.period_month), func.max(SalesFact.period_month))
+        ).one()
+    elif source == "stock":
+        min_date, max_date = db.execute(
+            select(func.min(StockSnapshot.snapshot_at), func.max(StockSnapshot.snapshot_at))
+        ).one()
+    elif source == "inbound":
+        min_date, max_date = db.execute(
+            select(func.min(InboundDelivery.eta_date), func.max(InboundDelivery.eta_date))
+        ).one()
+    elif source == "management_report":
+        min_year, max_year = db.execute(
+            select(
+                func.min(ManagementReportMetric.metric_year),
+                func.max(ManagementReportMetric.metric_year),
+            )
+        ).one()
+        if min_year is None or max_year is None:
+            return None
+        return {
+            "date_from": f"{int(min_year)}-01-01",
+            "date_to": f"{int(max_year)}-12-31",
+            "min_year": int(min_year),
+            "max_year": int(max_year),
+            "label": f"{int(min_year)}–{int(max_year)}",
+        }
+    else:
+        return None
+    start = _parse_date(min_date)
+    end = _parse_date(max_date)
+    if start is None or end is None:
+        return None
+    return {
+        "date_from": start.isoformat(),
+        "date_to": end.isoformat(),
+        "min_year": start.year,
+        "max_year": end.year,
+        "label": f"{start.year}–{end.year}" if start.year != end.year else str(start.year),
+    }
+
+
+def _infer_year_source(params: dict[str, object]) -> str | None:
+    period = params.get("period")
+    if isinstance(period, dict):
+        value = period.get("year_source") or period.get("yearSource")
+        if value:
+            return str(value)
+    if params.get("year_source"):
+        return str(params["year_source"])
+    date_from = str(params.get("date_from") or "")
+    question = str(params.get("question") or "")
+    if len(date_from) >= 4 and date_from[:4].isdigit() and date_from[:4] in question:
+        return "explicit"
+    if len(date_from) >= 4 and date_from[:4].isdigit():
+        return "explicit"
+    return None
+
+
+def _is_overview_analytics_params(params: dict[str, object]) -> bool:
+    question = str(params.get("question") or "").lower()
+    if not question:
+        return False
+    has_year = any(str(year) in question for year in range(2020, 2031)) or "год" in question
+    overview_tokens = (
+        "как в целом",
+        "как закрыли",
+        "закрыли",
+        "итоги",
+        "что по",
+        "результат",
+        "за год",
+    )
+    return has_year and any(token in question for token in overview_tokens)
+
+
+def _query_plan(
+    *,
+    metrics: list[str],
+    dimensions: list[str],
+    params: dict[str, object],
+    date_from: date | None,
+    date_to: date | None,
+    sort_by: str | None,
+    sort_direction: str,
+    limit: int,
+    comparison: object | None = None,
+) -> dict[str, object]:
+    filters = params.get("filters") if isinstance(params.get("filters"), dict) else {}
+    normalized_filters = dict(filters)
+    for key in ("client_id", "client_name", "sku_id", "category_id"):
+        if params.get(key) is not None:
+            normalized_filters[key] = params[key]
+    return {
+        "metrics": metrics,
+        "dimensions": dimensions,
+        "filters": normalized_filters,
+        "date_from": date_from.isoformat() if date_from else None,
+        "date_to": date_to.isoformat() if date_to else None,
+        "year_source": _infer_year_source(params),
+        "comparison": comparison,
+        "sort_by": sort_by,
+        "sort_direction": sort_direction,
+        "limit": limit,
+    }
+
+
 def _filter_value(params: dict[str, object], key: str) -> object | None:
     filters = params.get("filters")
     if isinstance(filters, dict) and filters.get(key) is not None:
@@ -1379,13 +1490,14 @@ def _analytics_slice_payload(
         _normalize_metric_name(item)
         for item in _string_list(params.get("metrics") or params.get("metric"))
     ]
+    raw_dimensions = params.get("dimensions") if "dimensions" in params else params.get("dimension")
     dimensions = [
         _normalize_dimension_name(item)
-        for item in _string_list(params.get("dimensions") or params.get("dimension"))
+        for item in _string_list(raw_dimensions)
     ]
     if not metrics:
         metrics = ["revenue"]
-    if not dimensions:
+    if not dimensions and raw_dimensions is None:
         dimensions = ["client"]
 
     unknown_metrics = unsupported_metrics(metrics)
@@ -1396,9 +1508,12 @@ def _analytics_slice_payload(
         else []
     )
     if unknown_metrics or unknown_dimensions or unsupported_for_source:
+        warning_code = "unsupported_metric" if unknown_metrics else "unsupported_dimension"
         return (
             {
-                "status": "unsupported",
+                "status": "needs_clarification",
+                "warning_code": warning_code,
+                "warning_codes": [warning_code],
                 "unsupported_metrics": unknown_metrics,
                 "unsupported_dimensions": unknown_dimensions + unsupported_for_source,
                 "supported_metrics": sorted(ANALYTICS_METRIC_CATALOG),
@@ -1411,12 +1526,22 @@ def _analytics_slice_payload(
                     key: {"label": spec.label, "source": spec.source}
                     for key, spec in DIMENSION_CATALOG.items()
                 },
+                "query_plan": _query_plan(
+                    metrics=metrics,
+                    dimensions=dimensions,
+                    params=params,
+                    date_from=None,
+                    date_to=None,
+                    sort_by=str(params.get("sort_by") or (metrics[0] if metrics else "")) or None,
+                    sort_direction=str(params.get("sort_direction") or "desc").lower(),
+                    limit=max(min(int(params.get("limit") or 20), 100), 1),
+                ),
             },
-            "Запрошенный аналитический срез пока не поддерживается",
+            "Запрошенный аналитический срез требует выбора поддерживаемых метрик или измерений",
             [],
             [
                 AssistantWarningData(
-                    code="analytics_slice_unsupported",
+                    code=warning_code,
                     message="Срез не поддерживается. В ответе перечислены доступные метрики и измерения.",
                     severity="warning",
                 )
@@ -1427,10 +1552,22 @@ def _analytics_slice_payload(
     if source is None:
         return (
             {
-                "status": "unsupported",
+                "status": "needs_clarification",
+                "warning_code": "cross_source_slice_not_supported",
+                "warning_codes": ["cross_source_slice_not_supported"],
                 "supported_metrics": sorted(ANALYTICS_METRIC_CATALOG),
                 "supported_dimensions": sorted(ANALYTICS_DIMENSION_CATALOG),
                 "reason": "cross_source_slice_not_supported",
+                "query_plan": _query_plan(
+                    metrics=metrics,
+                    dimensions=dimensions,
+                    params=params,
+                    date_from=None,
+                    date_to=None,
+                    sort_by=str(params.get("sort_by") or (metrics[0] if metrics else "")) or None,
+                    sort_direction=str(params.get("sort_direction") or "desc").lower(),
+                    limit=max(min(int(params.get("limit") or 20), 100), 1),
+                ),
             },
             "Срез из нескольких источников пока нужно запрашивать отдельными вопросами",
             [],
@@ -1444,6 +1581,8 @@ def _analytics_slice_payload(
         )
 
     limit = max(min(int(params.get("limit") or 20), 100), 1)
+    date_from, date_to = _period_filter(params)
+    available_range = _available_date_range(db, source)
     if source == "sales":
         rows = _analytics_sales_rows(db, bundle, params, metrics, dimensions, limit)
         source_ref = _source_ref(
@@ -1531,19 +1670,69 @@ def _analytics_slice_payload(
             reverse=sort_direction != "asc",
         )[:limit]
 
+    overview_breakdowns: list[dict[str, object]] = []
+    if source == "sales" and not dimensions and _is_overview_analytics_params(params):
+        for dimension in ("client", "category"):
+            if unsupported_dimensions_for_metrics(metrics, [dimension]):
+                continue
+            breakdown_rows = _analytics_sales_rows(db, bundle, params, metrics, [dimension], limit)
+            overview_breakdowns.append(
+                {
+                    "dimension": dimension,
+                    "label": DIMENSION_CATALOG[dimension].label,
+                    "rows": breakdown_rows,
+                    "totals": {
+                        metric: round(
+                            sum(float(row.get(metric) or 0) for row in breakdown_rows),
+                            4,
+                        )
+                        for metric in metrics
+                    },
+                }
+            )
+
     totals = {
         metric: round(sum(float(row.get(metric) or 0) for row in rows), 4) for metric in metrics
     }
     status = "completed" if rows else "no_data"
     warnings = []
     if not rows:
+        warning_code = "analytics_no_data"
+        available_start = _parse_date(available_range["date_from"]) if available_range else None
+        available_end = _parse_date(available_range["date_to"]) if available_range else None
+        if (
+            date_from
+            and date_to
+            and available_start
+            and available_end
+            and (date_to < available_start or date_from > available_end)
+        ):
+            warning_code = "unavailable_period"
         warnings.append(
             AssistantWarningData(
-                code="analytics_slice_no_data",
-                message="По выбранным метрикам, измерениям и фильтрам данных не найдено.",
+                code=warning_code,
+                message=(
+                    "По выбранному периоду данных не найдено."
+                    if warning_code == "unavailable_period"
+                    else "По выбранным метрикам, измерениям и фильтрам данных не найдено."
+                ),
                 severity="warning",
             )
         )
+    query_plan = _query_plan(
+        metrics=metrics,
+        dimensions=dimensions,
+        params=params,
+        date_from=date_from,
+        date_to=date_to,
+        sort_by=sort_by or None,
+        sort_direction=sort_direction,
+        limit=limit,
+    )
+    if overview_breakdowns:
+        query_plan["overview_breakdowns"] = [
+            str(item["dimension"]) for item in overview_breakdowns
+        ]
     return (
         {
             "status": status,
@@ -1552,13 +1741,25 @@ def _analytics_slice_payload(
             "dimensions": dimensions,
             "rows": rows,
             "totals": totals,
-            "date_from": (
-                _period_filter(params)[0].isoformat() if _period_filter(params)[0] else None
+            "chart_spec": _analytics_chart_spec(
+                source=source,
+                metrics=metrics,
+                dimensions=dimensions,
+                rows=rows,
+                status=status,
+                sort_direction=sort_direction,
+                question=str(params.get("question") or ""),
             ),
-            "date_to": _period_filter(params)[1].isoformat() if _period_filter(params)[1] else None,
+            "date_from": date_from.isoformat() if date_from else None,
+            "date_to": date_to.isoformat() if date_to else None,
             "sort_by": sort_by or None,
             "sort_direction": sort_direction,
             "limit": limit,
+            "query_plan": query_plan,
+            "overview_breakdowns": overview_breakdowns,
+            "available_date_range": available_range,
+            "filtered_available_date_range": available_range,
+            "warning_codes": [warning.code for warning in warnings],
             "query_description": (
                 f"{source}: {', '.join(metrics)}"
                 f"{' по ' + ', '.join(dimensions) if dimensions else ''}"
@@ -1571,6 +1772,50 @@ def _analytics_slice_payload(
         source_refs,
         warnings,
     )
+
+
+def _analytics_chart_spec(
+    *,
+    source: str,
+    metrics: list[str],
+    dimensions: list[str],
+    rows: list[dict[str, object]],
+    status: str,
+    sort_direction: str,
+    question: str = "",
+) -> dict[str, object]:
+    if status != "completed" or not rows:
+        return {"type": "table", "title": "Нет данных для графика", "series": [], "render": False}
+    primary_metric = metrics[0] if metrics else "value"
+    primary_dimension = dimensions[0] if dimensions else "Итого"
+    question_lower = question.lower()
+    is_ranking = any(
+        token in question_lower
+        for token in ("топ", "top", "антитоп", "худш", "лучш", "выгодн")
+    )
+    is_decline = sort_direction == "asc" or any(
+        token in question_lower for token in ("просел", "упал", "падени", "потерял")
+    )
+    if "month" in dimensions:
+        chart_type = "line"
+    elif is_decline:
+        chart_type = "waterfall"
+    elif is_ranking:
+        chart_type = "bar_horizontal"
+    elif primary_dimension in {"client", "category", "product_group"} and len(rows) > 1:
+        chart_type = "bar"
+    elif dimensions and len(rows) > 1:
+        chart_type = "bar_horizontal"
+    else:
+        chart_type = "table"
+    return {
+        "type": chart_type,
+        "title": f"{source}: {primary_metric} по {primary_dimension}",
+        "x": primary_dimension,
+        "y": primary_metric,
+        "series": rows[:20],
+        "render": chart_type != "table",
+    }
 
 
 def _analytics_sales_rows(

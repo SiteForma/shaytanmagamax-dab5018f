@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Literal
 
 AnalyticsSource = Literal["sales", "stock", "reserve", "inbound", "management_report", "catalog"]
@@ -15,6 +15,9 @@ class MetricSpec:
     unit: str
     supported_dimensions: tuple[str, ...]
     required_capabilities: tuple[tuple[str, str], ...]
+    description: str = ""
+    aggregation: str = ""
+    aliases: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,6 +27,8 @@ class DimensionSpec:
     source: AnalyticsSource | Literal["shared"]
     resolver: str
     required_capabilities: tuple[tuple[str, str], ...] = ()
+    description: str = ""
+    aliases: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -286,6 +291,30 @@ DIMENSION_CATALOG: dict[str, DimensionSpec] = {
     "quarter": DimensionSpec("quarter", "Квартал", "shared", "quarter"),
     "year": DimensionSpec("year", "Год", "shared", "year"),
     "region": DimensionSpec("region", "Регион", "sales", "client_region", (("clients", "read"),)),
+}
+
+
+def _aliases_for(catalog_key: str, aliases: dict[str, str]) -> tuple[str, ...]:
+    return tuple(sorted({alias for alias, key in aliases.items() if key == catalog_key}))
+
+
+METRIC_CATALOG = {
+    key: replace(
+        spec,
+        aliases=_aliases_for(key, METRIC_ALIASES),
+        description=spec.description or spec.label,
+        aggregation=spec.aggregation or spec.expression_type,
+    )
+    for key, spec in METRIC_CATALOG.items()
+}
+
+DIMENSION_CATALOG = {
+    key: replace(
+        spec,
+        aliases=_aliases_for(key, DIMENSION_ALIASES),
+        description=spec.description or spec.label,
+    )
+    for key, spec in DIMENSION_CATALOG.items()
 }
 
 

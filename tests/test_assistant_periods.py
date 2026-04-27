@@ -20,6 +20,26 @@ def test_parse_month_without_year_uses_default_year() -> None:
 
     assert period.date_from == "2025-03-01"
     assert period.date_to == "2025-03-31"
+    assert period.year_source == "context"
+
+
+def test_parse_month_without_year_uses_db_last_before_current_year() -> None:
+    period = parse_period_text(
+        "за март",
+        today=date(2026, 4, 26),
+        available_date_range={"date_from": "2023-01-01", "date_to": "2025-12-01"},
+    )
+
+    assert period.date_from == "2025-03-01"
+    assert period.date_to == "2025-03-31"
+    assert period.year_source == "db_last"
+
+
+def test_parse_month_without_context_falls_back_to_current_year() -> None:
+    period = parse_period_text("за март", today=date(2026, 4, 26))
+
+    assert period.date_from == "2026-03-01"
+    assert period.year_source == "current"
 
 
 def test_parse_relative_months() -> None:
@@ -60,5 +80,6 @@ def test_parse_year_and_previous_year() -> None:
     assert year.date_from == "2025-01-01"
     assert year.date_to == "2025-12-31"
     assert year.granularity == "year"
+    assert year.year_source == "explicit"
     assert previous.date_from == "2025-01-01"
     assert previous.date_to == "2025-12-31"

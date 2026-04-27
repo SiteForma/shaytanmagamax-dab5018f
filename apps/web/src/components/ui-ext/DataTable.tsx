@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type CSSProperties, type ReactNode } from "react";
 import {
   ColumnDef,
   ColumnFiltersState,
@@ -13,7 +13,7 @@ import {
   getSortedRowModel,
   useReactTable,
 } from "@tanstack/react-table";
-import { ArrowUpDown, ChevronDown, ChevronLeft, ChevronRight, Search, SlidersHorizontal } from "lucide-react";
+import { ArrowUpDown, Search, SlidersHorizontal, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -28,6 +28,7 @@ import { cn } from "@/lib/utils";
 import { TableSkeleton } from "./Skeleton";
 import { EmptyState } from "./EmptyState";
 import { Inbox } from "lucide-react";
+import { PaginationBar } from "./PaginationBar";
 
 export type Density = "compact" | "default" | "comfortable";
 
@@ -51,18 +52,36 @@ interface DataTableProps<T> {
   totalRows?: number;
   onPageChange?: (page: number) => void;
   onPageSizeChange?: (pageSize: number) => void;
+  pageSizeOptions?: number[];
   onRowClick?: (row: T) => void;
   emptyTitle?: string;
   emptyDescription?: string;
-  rightToolbar?: React.ReactNode;
+  rightToolbar?: ReactNode;
   className?: string;
 }
+
+type ColumnVisualMeta = {
+  align?: "left" | "right" | "center";
+  maxWidth?: CSSProperties["maxWidth"];
+  minWidth?: CSSProperties["minWidth"];
+  mono?: boolean;
+  nowrap?: boolean;
+  width?: CSSProperties["width"];
+};
 
 const DENSITY_PADDING: Record<Density, string> = {
   compact: "py-1.5",
   default: "py-2.5",
   comfortable: "py-3.5",
 };
+
+function columnSizingStyle(meta: ColumnVisualMeta): CSSProperties {
+  return {
+    maxWidth: meta.maxWidth,
+    minWidth: meta.minWidth,
+    width: meta.width,
+  };
+}
 
 export function DataTable<T>({
   data,
@@ -84,6 +103,7 @@ export function DataTable<T>({
   totalRows,
   onPageChange,
   onPageSizeChange,
+  pageSizeOptions,
   onRowClick,
   emptyTitle = "Нет данных",
   emptyDescription,
@@ -178,12 +198,23 @@ export function DataTable<T>({
   const rows = table.getRowModel().rows;
   const totalCount = manualPagination ? totalRows ?? data.length : table.getFilteredRowModel().rows.length;
   const currentPage = manualPagination ? page : table.getState().pagination.pageIndex + 1;
-  const canPreviousPage = manualPagination ? currentPage > 1 : table.getCanPreviousPage();
-  const canNextPage = manualPagination
-    ? currentPage * resolvedPageSize < totalCount
-    : table.getCanNextPage();
   const rangeStart = totalCount === 0 ? 0 : (currentPage - 1) * resolvedPageSize + 1;
   const rangeEnd = totalCount === 0 ? 0 : Math.min(rangeStart + rows.length - 1, totalCount);
+  const goToPage = (nextPage: number) => {
+    if (manualPagination) {
+      onPageChange?.(nextPage);
+      return;
+    }
+    table.setPageIndex(Math.max(nextPage - 1, 0));
+  };
+  const changePageSize = (nextPageSize: number) => {
+    if (onPageSizeChange) {
+      onPageSizeChange(nextPageSize);
+      onPageChange?.(1);
+      return;
+    }
+    setPagination({ pageIndex: 0, pageSize: nextPageSize });
+  };
 
   return (
     <div className={cn("panel overflow-hidden", className)}>
@@ -195,18 +226,32 @@ export function DataTable<T>({
             value={resolvedGlobalFilter}
             onChange={(e) => applySearchChange(e.target.value)}
             placeholder={searchPlaceholder}
-            className="h-8 border-line-subtle bg-surface-panel pl-8 text-sm placeholder:text-ink-muted"
+            className="h-8 border-line-subtle bg-surface-panel pl-8 pr-8 text-sm placeholder:text-ink-muted"
           />
+          {resolvedGlobalFilter ? (
+            <button
+              type="button"
+              aria-label="Очистить поиск"
+              onClick={() => applySearchChange("")}
+              className="absolute right-2 top-1/2 inline-flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-full text-ink-muted transition hover:bg-surface-hover hover:text-ink"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          ) : null}
         </div>
 
         {rightToolbar}
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="outline" size="sm" className="h-8 gap-1.5 border-line-subtle bg-surface-panel">
+            <Button
+              variant="outline"
+              size="sm"
+              aria-label="Настроить колонки"
+              title="Настроить колонки"
+              className="h-8 w-8 border-line-subtle bg-surface-panel p-0"
+            >
               <SlidersHorizontal className="h-3.5 w-3.5" />
-              Колонки
-              <ChevronDown className="h-3 w-3 opacity-60" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-52">
@@ -240,12 +285,12 @@ export function DataTable<T>({
             <EmptyState icon={Inbox} title={emptyTitle} description={emptyDescription} />
           </div>
         ) : (
-          <table className="w-full text-sm">
+          <table className="min-w-full table-auto text-sm">
             <thead className="sticky top-0 z-10 bg-surface-elevated/95 backdrop-blur supports-[backdrop-filter]:bg-surface-elevated/80">
               {table.getHeaderGroups().map((hg) => (
                 <tr key={hg.id} className="border-b border-line-subtle">
                   {hg.headers.map((h) => {
-                    const meta = (h.column.columnDef.meta ?? {}) as { align?: "left" | "right" | "center" };
+                    const meta = (h.column.columnDef.meta ?? {}) as ColumnVisualMeta;
                     const align = meta.align ?? "left";
                     return (
                       <th
@@ -255,8 +300,9 @@ export function DataTable<T>({
                           align === "right" && "text-right",
                           align === "center" && "text-center",
                           align === "left" && "text-left",
+                          meta.nowrap && "whitespace-nowrap",
                         )}
-                        style={{ width: h.getSize() === 150 ? undefined : h.getSize() }}
+                        style={columnSizingStyle(meta)}
                       >
                         {h.isPlaceholder ? null : h.column.getCanSort() ? (
                           <button
@@ -287,7 +333,7 @@ export function DataTable<T>({
                   )}
                 >
                   {row.getVisibleCells().map((cell) => {
-                    const meta = (cell.column.columnDef.meta ?? {}) as { align?: "left" | "right" | "center"; mono?: boolean };
+                    const meta = (cell.column.columnDef.meta ?? {}) as ColumnVisualMeta;
                     return (
                       <td
                         key={cell.id}
@@ -297,7 +343,9 @@ export function DataTable<T>({
                           meta.align === "right" && "text-right tabular-nums",
                           meta.align === "center" && "text-center",
                           meta.mono && "tabular-nums",
+                          meta.nowrap && "whitespace-nowrap",
                         )}
+                        style={columnSizingStyle(meta)}
                       >
                         {flexRender(cell.column.columnDef.cell, cell.getContext())}
                       </td>
@@ -310,63 +358,17 @@ export function DataTable<T>({
         )}
       </div>
 
-      {/* Footer / pagination */}
-      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-line-subtle bg-surface-elevated/40 px-3 py-2 text-xs text-ink-muted">
-        <div>
-          {rows.length > 0
-            ? `${rangeStart}–${rangeEnd} из ${totalCount}`
-            : "0 результатов"}
-        </div>
-        <div className="flex items-center gap-2">
-          <select
-            value={resolvedPageSize}
-            onChange={(e) => {
-              const n = Number(e.target.value);
-              if (onPageSizeChange) {
-                onPageSizeChange(n);
-                onPageChange?.(1);
-                return;
-              }
-              setPagination({ pageIndex: 0, pageSize: n });
-            }}
-            className="h-7 rounded-md border border-line-subtle bg-surface-panel px-2 text-xs text-ink focus-ring"
-          >
-            {[10, 20, 50, 100].map((s) => (
-              <option key={s} value={s}>{s} / стр.</option>
-            ))}
-          </select>
-          <Button
-            variant="outline"
-            size="icon"
-            className="h-7 w-7 border-line-subtle bg-surface-panel"
-            onClick={() => {
-              if (manualPagination) {
-                onPageChange?.(Math.max(currentPage - 1, 1));
-                return;
-              }
-              table.previousPage();
-            }}
-            disabled={!canPreviousPage}
-          >
-            <ChevronLeft className="h-3.5 w-3.5" />
-          </Button>
-          <Button
-            variant="outline"
-            size="icon"
-            className="h-7 w-7 border-line-subtle bg-surface-panel"
-            onClick={() => {
-              if (manualPagination) {
-                onPageChange?.(currentPage + 1);
-                return;
-              }
-              table.nextPage();
-            }}
-            disabled={!canNextPage}
-          >
-            <ChevronRight className="h-3.5 w-3.5" />
-          </Button>
-        </div>
-      </div>
+      <PaginationBar
+        page={currentPage}
+        pageSize={resolvedPageSize}
+        totalRows={totalCount}
+        rangeStart={rangeStart}
+        rangeEnd={rangeEnd}
+        onPageChange={goToPage}
+        onPageSizeChange={changePageSize}
+        pageSizeOptions={pageSizeOptions}
+        itemLabel="результатов"
+      />
     </div>
   );
 }

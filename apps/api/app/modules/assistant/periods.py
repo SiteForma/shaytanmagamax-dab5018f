@@ -31,6 +31,7 @@ class ParsedPeriod:
     previous_period: str | None = None
     granularity: str | None = None
     label: str | None = None
+    year_source: str | None = None
 
     def as_range_params(self) -> dict[str, str]:
         result: dict[str, str] = {}
@@ -60,11 +61,47 @@ def _add_months(year: int, month: int, delta: int) -> tuple[int, int]:
     return value // 12, value % 12 + 1
 
 
-def _find_year(text: str, default_year: int | None) -> int:
+def _year_from_available_range(value: object) -> int | None:
+    if value is None:
+        return None
+    date_to: object | None = None
+    if isinstance(value, dict):
+        date_to = value.get("date_to") or value.get("max_date") or value.get("to")
+        max_year = value.get("max_year")
+        if isinstance(max_year, int):
+            return max_year
+        if isinstance(max_year, str) and max_year.isdigit():
+            return int(max_year)
+    elif isinstance(value, tuple | list) and len(value) >= 2:
+        date_to = value[1]
+    if isinstance(date_to, date):
+        return date_to.year
+    if date_to:
+        text = str(date_to)
+        if len(text) >= 4 and text[:4].isdigit():
+            return int(text[:4])
+    return None
+
+
+def _resolve_year(
+    text: str,
+    *,
+    default_year: int | None,
+    context_year: int | None,
+    available_date_range: object | None,
+    today: date,
+) -> tuple[int, str]:
     match = re.search(r"\b(20\d{2})\b", text)
     if match:
-        return int(match.group(1))
-    return default_year or date.today().year
+        return int(match.group(1)), "explicit"
+    if context_year is not None:
+        return context_year, "context"
+    if default_year is not None:
+        return default_year, "context"
+    db_year = _year_from_available_range(available_date_range)
+    if db_year is not None:
+        return db_year, "db_last"
+    return today.year, "current"
 
 
 def _find_month_token(text: str) -> tuple[str, int] | None:
@@ -75,7 +112,11 @@ def _find_month_token(text: str) -> tuple[str, int] | None:
 
 
 def _range_payload(
-    start: date, end_marker: date, label: str, granularity: str = "month"
+    start: date,
+    end_marker: date,
+    label: str,
+    granularity: str = "month",
+    year_source: str | None = None,
 ) -> ParsedPeriod:
     return ParsedPeriod(
         date_from=start.isoformat(),
@@ -84,6 +125,7 @@ def _range_payload(
         previous_period=_previous_month_marker(start.year, start.month),
         granularity=granularity,
         label=label,
+        year_source=year_source,
     )
 
 
@@ -91,6 +133,8 @@ def parse_period_text(
     text: str,
     *,
     default_year: int | None = None,
+    context_year: int | None = None,
+    available_date_range: object | None = None,
     today: date | None = None,
 ) -> ParsedPeriod:
     q = text.lower().replace("ё", "е")
@@ -98,19 +142,25 @@ def parse_period_text(
 
     if "прошлый год" in q or "прошлом году" in q:
         year = today.year - 1
-        return _range_payload(date(year, 1, 1), date(year, 12, 31), f"{year} год", "year")
+        return _range_payload(
+            date(year, 1, 1), date(year, 12, 31), f"{year} год", "year", "current"
+        )
 
     if "этот месяц" in q or "текущий месяц" in q:
         return _range_payload(
             _month_start(today.year, today.month),
             _month_end_marker(today.year, today.month),
             "этот месяц",
+            year_source="current",
         )
 
     if "прошлый месяц" in q or "прошлым месяц" in q:
         year, month = _add_months(today.year, today.month, -1)
         return _range_payload(
-            _month_start(year, month), _month_end_marker(year, month), "прошлый месяц"
+            _month_start(year, month),
+            _month_end_marker(year, month),
+            "прошлый месяц",
+            year_source="current",
         )
 
     recent_match = re.search(r"последн(?:ие|их|ий)?\s+(\d+)\s+месяц", q)
@@ -122,12 +172,23 @@ def parse_period_text(
             _month_end_marker(today.year, today.month),
             f"последние {months} мес.",
             "range",
+            "current",
         )
 
     quarter_match = re.search(r"\b(?:([1-4])\s*(?:квартал|кв\.?|q)|q\s*([1-4]))\s*(20\d{2})?\b", q)
     if quarter_match:
         quarter = int(quarter_match.group(1) or quarter_match.group(2))
-        year = int(quarter_match.group(3) or _find_year(q, default_year))
+        if quarter_match.group(3):
+            year = int(quarter_match.group(3))
+            year_source = "explicit"
+        else:
+            year, year_source = _resolve_year(
+                q,
+                default_year=default_year,
+                context_year=context_year,
+                available_date_range=available_date_range,
+                today=today,
+            )
         start_month = (quarter - 1) * 3 + 1
         end_month = start_month + 2
         return _range_payload(
@@ -135,6 +196,7 @@ def parse_period_text(
             _month_end_marker(year, end_month),
             f"{quarter} квартал {year}",
             "quarter",
+            year_source,
         )
 
     range_match = re.search(
@@ -146,28 +208,48 @@ def parse_period_text(
         first = _month_number(range_match.group(1))
         second = _month_number(range_match.group(2))
         if first and second:
-            year = int(range_match.group(3) or _find_year(q, default_year))
+            if range_match.group(3):
+                year = int(range_match.group(3))
+                year_source = "explicit"
+            else:
+                year, year_source = _resolve_year(
+                    q,
+                    default_year=default_year,
+                    context_year=context_year,
+                    available_date_range=available_date_range,
+                    today=today,
+                )
             return _range_payload(
                 _month_start(year, first),
                 _month_end_marker(year, second),
                 f"{_month_label(first)}-{_month_label(second)} {year}",
                 "range",
+                year_source,
             )
 
     month_token = _find_month_token(q)
     if month_token:
         _, month = month_token
-        year = _find_year(q, default_year)
+        year, year_source = _resolve_year(
+            q,
+            default_year=default_year,
+            context_year=context_year,
+            available_date_range=available_date_range,
+            today=today,
+        )
         return _range_payload(
             _month_start(year, month),
             _month_end_marker(year, month),
             f"{_month_label(month)} {year}",
+            year_source=year_source,
         )
 
     year_match = re.search(r"\b(20\d{2})\b(?:\s*(?:год|г\.?))?", q)
     if year_match:
         year = int(year_match.group(1))
-        return _range_payload(date(year, 1, 1), date(year, 12, 31), f"{year} год", "year")
+        return _range_payload(
+            date(year, 1, 1), date(year, 12, 31), f"{year} год", "year", "explicit"
+        )
 
     return ParsedPeriod()
 

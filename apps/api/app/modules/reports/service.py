@@ -34,6 +34,7 @@ def _serialize_import(item: ManagementReportImport) -> ManagementReportImportRes
         sheetCount=item.sheet_count,
         rawRowCount=item.raw_row_count,
         metricCount=item.metric_count,
+        uploadFileId=item.upload_file_id,
         createdAt=item.created_at.isoformat(),
         updatedAt=item.updated_at.isoformat(),
         metadataPayload=item.metadata_payload,

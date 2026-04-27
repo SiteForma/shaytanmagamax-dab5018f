@@ -17,6 +17,18 @@ import {
   Trash2,
   X,
 } from "lucide-react";
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 import magamaxMark from "@/assets/magamax-mark.png";
 import { SectionTitle } from "@/components/ui-ext/PageHeader";
 import { QueryErrorState } from "@/components/ui-ext/QueryErrorState";
@@ -204,6 +216,227 @@ function formatToolArgument(value: unknown) {
   return String(value);
 }
 
+function isChartSpecRow(row: Record<string, unknown>) {
+  return "render" in row && "series" in row && "type" in row;
+}
+
+type AssistantChartRow = Record<string, string | number | null>;
+
+type AssistantChartSpec = {
+  type?: string;
+  title?: string;
+  x?: string;
+  y?: string;
+  series?: unknown;
+  render?: unknown;
+};
+
+const CHART_BRAND = "hsl(18 100% 56%)";
+const CHART_WARNING = "hsl(38 95% 54%)";
+const CHART_POSITIVE = "hsl(151 58% 48%)";
+
+function readCssToken(name: string, fallback: string) {
+  if (typeof window === "undefined") return fallback;
+  const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return value ? `hsl(${value})` : fallback;
+}
+
+function useAssistantChartTokens() {
+  const compute = () => ({
+    grid: readCssToken("--border-subtle", "hsl(24 6% 18%)"),
+    axis: readCssToken("--text-muted", "hsl(30 6% 46%)"),
+    tooltipBg: readCssToken("--bg-elevated", "hsl(24 8% 9%)"),
+    tooltipBorder: readCssToken("--border-strong", "hsl(24 6% 22%)"),
+    tooltipText: readCssToken("--text-primary", "hsl(30 12% 96%)"),
+    hover: readCssToken("--bg-hover", "hsl(24 6% 28%)"),
+  });
+  const [tokens, setTokens] = useState(compute);
+  useEffect(() => {
+    const observer = new MutationObserver(() => setTokens(compute()));
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+    return () => observer.disconnect();
+  }, []);
+  return tokens;
+}
+
+function chartTooltipStyle(tokens: ReturnType<typeof useAssistantChartTokens>) {
+  return {
+    background: tokens.tooltipBg,
+    border: `1px solid ${tokens.tooltipBorder}`,
+    borderRadius: 12,
+    color: tokens.tooltipText,
+    fontSize: 12,
+    boxShadow: "0 18px 50px rgba(0,0,0,0.28)",
+  };
+}
+
+function normalizeChartSeries(series: unknown): AssistantChartRow[] {
+  if (!Array.isArray(series)) return [];
+  return series
+    .filter((item): item is Record<string, unknown> => item !== null && typeof item === "object" && !Array.isArray(item))
+    .map((item) => {
+      const normalized: AssistantChartRow = {};
+      for (const [key, value] of Object.entries(item)) {
+        if (typeof value === "number" || typeof value === "string" || value === null) {
+          normalized[key] = value;
+        }
+      }
+      return normalized;
+    });
+}
+
+function resolveChartKeys(chart: AssistantChartSpec, data: AssistantChartRow[]) {
+  const sample = data[0] ?? {};
+  const numericKey = Object.keys(sample).find((key) => typeof sample[key] === "number");
+  const xKey = String(chart.x || Object.keys(sample).find((key) => key !== numericKey) || "dimension");
+  const yKey = String(chart.y || numericKey || "value");
+  return { xKey, yKey };
+}
+
+function AssistantChart({ chart }: { chart: AssistantChartSpec }) {
+  const tokens = useAssistantChartTokens();
+  const data = normalizeChartSeries(chart.series);
+  const { xKey, yKey } = resolveChartKeys(chart, data);
+  const type = String(chart.type || "table");
+  const tooltipStyle = chartTooltipStyle(tokens);
+
+  if (!data.length) {
+    return (
+      <div className="grid h-[220px] place-items-center rounded-xl border border-warning/25 bg-warning/10 text-sm text-ink-secondary">
+        Нет данных для графика.
+      </div>
+    );
+  }
+
+  if (type === "line") {
+    return (
+      <ResponsiveContainer width="100%" height={240}>
+        <LineChart data={data} margin={{ left: -18, right: 12, top: 12, bottom: 0 }}>
+          <CartesianGrid stroke={tokens.grid} strokeDasharray="3 3" vertical={false} />
+          <XAxis dataKey={xKey} stroke={tokens.axis} fontSize={11} tickLine={false} axisLine={false} />
+          <YAxis stroke={tokens.axis} fontSize={11} tickLine={false} axisLine={false} width={42} />
+          <Tooltip contentStyle={tooltipStyle} cursor={{ stroke: CHART_BRAND, strokeOpacity: 0.24 }} />
+          <Line type="monotone" dataKey={yKey} stroke={CHART_BRAND} strokeWidth={2.5} dot={{ r: 2.5, fill: CHART_BRAND }} activeDot={{ r: 4 }} />
+        </LineChart>
+      </ResponsiveContainer>
+    );
+  }
+
+  if (type === "bar_horizontal") {
+    return (
+      <ResponsiveContainer width="100%" height={Math.max(240, data.length * 34)}>
+        <BarChart data={data} layout="vertical" margin={{ left: 18, right: 18, top: 12, bottom: 0 }}>
+          <CartesianGrid stroke={tokens.grid} strokeDasharray="3 3" horizontal={false} />
+          <XAxis type="number" stroke={tokens.axis} fontSize={11} tickLine={false} axisLine={false} />
+          <YAxis dataKey={xKey} type="category" stroke={tokens.axis} fontSize={11} tickLine={false} axisLine={false} width={132} />
+          <Tooltip contentStyle={tooltipStyle} cursor={{ fill: tokens.hover, fillOpacity: 0.24 }} />
+          <Bar dataKey={yKey} fill={CHART_BRAND} radius={[0, 8, 8, 0]} />
+        </BarChart>
+      </ResponsiveContainer>
+    );
+  }
+
+  if (type === "waterfall") {
+    return (
+      <ResponsiveContainer width="100%" height={240}>
+        <BarChart data={data} margin={{ left: -18, right: 12, top: 12, bottom: 0 }}>
+          <CartesianGrid stroke={tokens.grid} strokeDasharray="3 3" vertical={false} />
+          <XAxis dataKey={xKey} stroke={tokens.axis} fontSize={11} tickLine={false} axisLine={false} />
+          <YAxis stroke={tokens.axis} fontSize={11} tickLine={false} axisLine={false} width={42} />
+          <Tooltip contentStyle={tooltipStyle} cursor={{ fill: tokens.hover, fillOpacity: 0.24 }} />
+          <Bar dataKey={yKey} radius={[8, 8, 0, 0]}>
+            {data.map((row, index) => (
+              <Cell
+                key={`${xKey}-${index}`}
+                fill={Number(row[yKey] ?? 0) < 0 ? CHART_WARNING : CHART_POSITIVE}
+              />
+            ))}
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+    );
+  }
+
+  return (
+    <ResponsiveContainer width="100%" height={240}>
+      <BarChart data={data} margin={{ left: -18, right: 12, top: 12, bottom: 0 }}>
+        <CartesianGrid stroke={tokens.grid} strokeDasharray="3 3" vertical={false} />
+        <XAxis dataKey={xKey} stroke={tokens.axis} fontSize={11} tickLine={false} axisLine={false} />
+        <YAxis stroke={tokens.axis} fontSize={11} tickLine={false} axisLine={false} width={42} />
+        <Tooltip contentStyle={tooltipStyle} cursor={{ fill: tokens.hover, fillOpacity: 0.24 }} />
+        <Bar dataKey={yKey} fill={CHART_BRAND} radius={[8, 8, 0, 0]} />
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}
+
+function AnalyticsRowsTable({ section }: { section: AssistantSection }) {
+  if (!section.rows.length) return null;
+  const columns = Object.keys(section.rows[0]);
+  return (
+    <section className="space-y-3">
+      <SectionTitle>{section.title}</SectionTitle>
+      <div className="overflow-hidden rounded-xl border border-line-subtle">
+        <div
+          className="grid bg-surface-muted/60 px-3 py-2 text-[11px] uppercase tracking-[0.12em] text-ink-muted"
+          style={{ gridTemplateColumns: `repeat(${columns.length}, minmax(0, 1fr))` }}
+        >
+          {columns.map((column) => (
+            <div key={column}>{ASSISTANT_COLUMN_LABELS[column] ?? column}</div>
+          ))}
+        </div>
+        <div className="divide-y divide-line-subtle">
+          {section.rows.map((row, index) => (
+            <div
+              key={`${section.id}-${index}`}
+              className="grid px-3 py-3 text-sm text-ink-secondary"
+              style={{ gridTemplateColumns: `repeat(${columns.length}, minmax(0, 1fr))` }}
+            >
+              {columns.map((column) => (
+                <div key={column} className={cn(column.toLowerCase().includes("qty") && "text-num")}>
+                  {formatAssistantCell(column, row[column])}
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function ChartSpecPreview({ section }: { section: AssistantSection }) {
+  const chart = section.rows.find((row) => isChartSpecRow(row)) as AssistantChartSpec | undefined;
+  if (!chart) return null;
+  const render = Boolean(chart.render);
+  const series = normalizeChartSeries(chart.series);
+  return (
+    <section className="space-y-3">
+      <SectionTitle>Визуализация</SectionTitle>
+      <div
+        className={cn(
+          "rounded-xl border px-4 py-3 text-sm",
+          render && series.length
+            ? "border-line-subtle bg-surface-muted/35 text-ink-secondary"
+            : "border-warning/35 bg-warning/10 text-ink-secondary",
+        )}
+      >
+        <div className="font-medium text-ink">{String(chart.title ?? "График")}</div>
+        <div className="mt-1 text-xs text-ink-muted">
+          {render && series.length
+            ? `Тип: ${String(chart.type)} · точек: ${series.length}`
+            : "График не строится: нет достаточных данных для визуализации."}
+        </div>
+        {render && series.length ? (
+          <div className="mt-4 rounded-xl border border-line-subtle bg-surface-panel/50 px-2 py-3">
+            <AssistantChart chart={chart} />
+          </div>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
 function MagamaxAssistantIcon({ className }: { className?: string }) {
   return (
     <img
@@ -260,37 +493,15 @@ function ResponseSection({ section }: { section: AssistantSection }) {
   }
 
   if (section.type === "reserve_table_preview" && section.rows.length) {
-    const columns = Object.keys(section.rows[0]);
-    return (
-      <section className="space-y-3">
-        <SectionTitle>{section.title}</SectionTitle>
-        <div className="overflow-hidden rounded-xl border border-line-subtle">
-          <div
-            className="grid bg-surface-muted/60 px-3 py-2 text-[11px] uppercase tracking-[0.12em] text-ink-muted"
-            style={{ gridTemplateColumns: `repeat(${columns.length}, minmax(0, 1fr))` }}
-          >
-            {columns.map((column) => (
-              <div key={column}>{ASSISTANT_COLUMN_LABELS[column] ?? column}</div>
-            ))}
-          </div>
-          <div className="divide-y divide-line-subtle">
-            {section.rows.map((row, index) => (
-              <div
-                key={`${section.id}-${index}`}
-                className="grid px-3 py-3 text-sm text-ink-secondary"
-                style={{ gridTemplateColumns: `repeat(${columns.length}, minmax(0, 1fr))` }}
-              >
-                {columns.map((column) => (
-                  <div key={column} className={cn(column.toLowerCase().includes("qty") && "text-num")}>
-                    {formatAssistantCell(column, row[column])}
-                  </div>
-                ))}
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-    );
+    return <AnalyticsRowsTable section={section} />;
+  }
+
+  if (section.title === "Chart spec") {
+    return <ChartSpecPreview section={section} />;
+  }
+
+  if (section.rows.length) {
+    return <AnalyticsRowsTable section={section} />;
   }
 
   if ((section.type === "warning_block" || section.type === "next_actions" || section.items.length) && section.items.length) {
@@ -323,11 +534,13 @@ function AssistantDetailsDialog({
   open,
   onOpenChange,
   onFollowup,
+  showDebugDetails = false,
 }: {
   response: AssistantResponse;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onFollowup: (prompt: string) => void;
+  showDebugDetails?: boolean;
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -357,9 +570,11 @@ function AssistantDetailsDialog({
                 <span className="rounded-full border border-line-subtle bg-surface-panel/70 px-2 py-1">
                   Уверенность {Math.round(response.confidence * 100)}%
                 </span>
-                <span className="rounded-full border border-line-subtle bg-surface-panel/70 px-2 py-1">
-                  Trace {response.traceId.slice(0, 8)}
-                </span>
+                {showDebugDetails ? (
+                  <span className="rounded-full border border-line-subtle bg-surface-panel/70 px-2 py-1">
+                    Trace {response.traceId.slice(0, 8)}
+                  </span>
+                ) : null}
               </div>
             </section>
 
@@ -367,7 +582,7 @@ function AssistantDetailsDialog({
               <ResponseSection key={section.id} section={section} />
             ))}
 
-            {response.toolCalls.length ? (
+            {showDebugDetails && response.toolCalls.length ? (
               <section className="rounded-2xl border border-line-subtle bg-surface-muted/25 px-4 py-4">
                 <SectionTitle>Трассировка и вызовы инструментов</SectionTitle>
                 <div className="mt-4 space-y-3">
@@ -479,6 +694,29 @@ function AssistantDetailsDialog({
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function isInlineAnalyticsSection(section: AssistantSection) {
+  if (section.title === "Chart spec") return true;
+  if (section.type === "metric_summary" && section.metrics.length) return true;
+  if (section.type === "reserve_table_preview" && section.rows.length) return true;
+  if (section.type === "warning_block" && section.items.length) return true;
+  if (section.title === "Инсайты" && section.items.length) return true;
+  return false;
+}
+
+function InlineResponseSections({ response }: { response: AssistantResponse }) {
+  if (response.intent !== "analytics_slice" && response.status !== "no_data") return null;
+  const sections = response.sections.filter(isInlineAnalyticsSection);
+  if (!sections.length) return null;
+
+  return (
+    <div className="space-y-4 rounded-2xl border border-line-subtle bg-surface-panel/35 p-4">
+      {sections.map((section) => (
+        <ResponseSection key={section.id} section={section} />
+      ))}
+    </div>
   );
 }
 
@@ -643,6 +881,7 @@ function AssistantResponseCard({
         </div>
 
         <ClarificationPanel response={response} onFollowup={onFollowup} />
+        <InlineResponseSections response={response} />
         <ResponseSourcesInline response={response} />
         <AssistantDetailsDialog
           response={response}

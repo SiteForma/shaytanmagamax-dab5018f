@@ -28,6 +28,7 @@ AssistantResponseType = Literal["answer", "clarification"]
 AssistantResponseStatus = Literal[
     "completed",
     "partial",
+    "no_data",
     "needs_clarification",
     "unsupported",
     "failed",

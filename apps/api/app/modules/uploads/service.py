@@ -47,6 +47,10 @@ from apps.api.app.modules.uploads.assortment_import import (
     import_assortment_from_upload,
     is_assortment_frame,
 )
+from apps.api.app.modules.uploads.management_report_import import (
+    import_management_report_from_upload,
+    is_management_report_payload,
+)
 from apps.api.app.modules.uploads.parsers import (
     build_preview_payload,
     read_upload_payload,
@@ -83,11 +87,12 @@ SOURCE_TYPES = {
     "category_structure",
     "inbound",
     "sku_costs",
+    "management_report",
     "raw_report",
 }
 BLOCKING_SEVERITIES = {"error", "critical"}
 RAW_REPORT_REVIEW_STATUS = "ready_to_review"
-AUTO_APPLY_SOURCE_TYPES = {"sku_costs"}
+AUTO_APPLY_SOURCE_TYPES = {"sku_costs", "management_report"}
 
 
 def _normalized_severity(value: str) -> str:
@@ -265,6 +270,7 @@ def _readiness(batch: UploadBatch) -> UploadReadinessResponse:
     auto_adapter = bool(
         batch.mapping_payload.get("stock_adapter")
         or batch.mapping_payload.get("assortment_adapter")
+        or batch.mapping_payload.get("management_report_adapter")
     )
     source_confirmed = not detection_payload.get("requires_confirmation") or bool(
         detection_payload.get("confirmed")
@@ -551,13 +557,31 @@ def _run_parse_stage(
     job_run = _create_job_run(db, batch.id, file_model.id, "parse_upload")
     db.flush()
     try:
-        parse_result = _read_frame(settings, file_model.storage_key, file_model.file_name)
+        storage = get_object_storage(settings)
+        payload = storage.load_upload_bytes(file_model.storage_key)
+        parse_result = read_upload_payload(payload, file_model.file_name)
         frame = parse_result.frame
         source_candidates = rank_source_type_candidates([str(column) for column in frame.columns])
         detected_source_type = detect_source_type(
             [str(column) for column in frame.columns], source_type_hint
         )
-        if source_type_hint is None and is_warehouse_stock_frame(frame):
+        if (
+            source_type_hint is None or source_type_hint == "management_report"
+        ) and is_management_report_payload(payload, file_model.file_name):
+            detected_source_type = "management_report"
+            source_candidates = [
+                {
+                    "source_type": "management_report",
+                    "confidence": 0.99,
+                    "matched_fields": ["workbook_sheets", "management_metrics"],
+                },
+                *[
+                    candidate
+                    for candidate in source_candidates
+                    if candidate.get("source_type") != "management_report"
+                ],
+            ][:5]
+        elif source_type_hint is None and is_warehouse_stock_frame(frame):
             detected_source_type = "stock"
             source_candidates = [
                 {
@@ -638,10 +662,17 @@ def _run_parse_stage(
                 file_model.id,
                 commit=False,
             )
+        elif detected_source_type == "management_report":
+            import_management_report_from_upload(
+                db,
+                storage,
+                file_model.id,
+                commit=False,
+            )
         elif detected_source_type == "stock" and is_warehouse_stock_frame(frame):
             import_warehouse_stock_from_upload(
                 db,
-                get_object_storage(settings),
+                storage,
                 file_model.id,
                 commit=False,
             )
@@ -650,7 +681,7 @@ def _run_parse_stage(
         ):
             import_assortment_from_upload(
                 db,
-                get_object_storage(settings),
+                storage,
                 file_model.id,
                 commit=False,
             )

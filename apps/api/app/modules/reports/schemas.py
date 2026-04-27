@@ -16,6 +16,7 @@ class ManagementReportImportResponse(ORMModel):
     sheet_count: int = Field(alias="sheetCount")
     raw_row_count: int = Field(alias="rawRowCount")
     metric_count: int = Field(alias="metricCount")
+    upload_file_id: str | None = Field(default=None, alias="uploadFileId")
     created_at: str = Field(alias="createdAt")
     updated_at: str = Field(alias="updatedAt")
     metadata_payload: dict[str, Any] = Field(default_factory=dict, alias="metadataPayload")

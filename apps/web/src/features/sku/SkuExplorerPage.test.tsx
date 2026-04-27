@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
 import SkuExplorerPage from "@/features/sku/SkuExplorerPage";
 import { renderWithProviders } from "@/test/render";
 
@@ -42,8 +42,55 @@ describe("SkuExplorerPage", () => {
     expect(screen.getAllByText("Направляющая").length).toBeGreaterThan(0);
     expect(screen.getByText("K-100 · Магамакс / Фурнитура")).toBeInTheDocument();
     expect(screen.getByText("Общий дефицит")).toBeInTheDocument();
+    expect(screen.getByText("Обособка / сети DIY")).toBeInTheDocument();
     expect(screen.getAllByText("Себестоимость").length).toBeGreaterThan(0);
     expect(screen.getByText("Направляющая из файла")).toBeInTheDocument();
     expect(screen.queryByText("Справочник себестоимости")).not.toBeInTheDocument();
+  });
+
+  it("filters the table when clicking a category badge", () => {
+    useSkusQuery.mockReturnValue({
+      data: [
+        {
+          id: "sku_1",
+          article: "P-100",
+          name: "Петля",
+          category: "07. Петли мебельные",
+          categoryPath: "Магамакс / Металл / 07. Петли мебельные",
+          brand: "Kerron",
+          unit: "pcs",
+          active: true,
+          costRub: 125.5,
+        },
+        {
+          id: "sku_2",
+          article: "V-200",
+          name: "Ваза",
+          category: "01. Вазы",
+          categoryPath: "Магамакс / Декор / 01. Вазы",
+          brand: "Lemax",
+          unit: "pcs",
+          active: true,
+          costRub: null,
+        },
+      ],
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    useSkuDetailQuery.mockReturnValue({
+      data: null,
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+
+    renderWithProviders(<SkuExplorerPage />, "/sku");
+
+    fireEvent.click(screen.getByTitle("Фильтровать по категории: 07. Петли мебельные"));
+
+    expect(screen.getByLabelText("Фильтр по категории")).toHaveValue("07. Петли мебельные");
+    expect(screen.getByText("Петля")).toBeInTheDocument();
+    expect(screen.queryByText("Ваза")).not.toBeInTheDocument();
   });
 });

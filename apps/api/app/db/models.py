@@ -563,6 +563,9 @@ class ManagementReportImport(TimestampMixin, Base):
     raw_row_count: Mapped[int] = mapped_column(Integer, default=0)
     metric_count: Mapped[int] = mapped_column(Integer, default=0)
     imported_by_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    upload_file_id: Mapped[str | None] = mapped_column(
+        ForeignKey("upload_files.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     metadata_payload: Mapped[dict[str, object]] = mapped_column(
         MutableDict.as_mutable(JSON), default=dict
     )

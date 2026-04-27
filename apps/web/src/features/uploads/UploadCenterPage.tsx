@@ -4,6 +4,7 @@ import { FileSpreadsheet, Upload, ArrowRight, ShieldAlert, Play, CheckCircle2 } 
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui-ext/PageHeader";
+import { PaginationBar } from "@/components/ui-ext/PaginationBar";
 import { QueryErrorState } from "@/components/ui-ext/QueryErrorState";
 import { Skeleton } from "@/components/ui-ext/Skeleton";
 import { cn } from "@/lib/utils";
@@ -416,60 +417,31 @@ export default function UploadCenterPage() {
             ) : null}
             </ul>
             {jobsMeta ? (
-              <div className="flex flex-wrap items-center justify-between gap-2 border-t border-line-subtle px-4 py-3 text-xs text-ink-muted">
-                <div>
-                  {jobsMeta.total > 0
-                    ? `${(jobsMeta.page - 1) * jobsMeta.pageSize + 1}–${Math.min(
-                        (jobsMeta.page - 1) * jobsMeta.pageSize + jobs.length,
-                        jobsMeta.total,
-                      )} из ${jobsMeta.total}`
-                    : "0 загрузок"}
-                </div>
-                <div className="flex items-center gap-2">
-                  <select
-                    value={jobsMeta.pageSize}
-                    onChange={(event) => {
-                      const next = new URLSearchParams(searchParams);
-                      next.set("pageSize", event.target.value);
-                      next.delete("page");
-                      setSearchParams(next);
-                    }}
-                    className="h-8 rounded-md border border-line-subtle bg-surface-panel px-2 text-xs text-ink"
-                  >
-                    {[12, 24, 48].map((value) => (
-                      <option key={value} value={value}>
-                        {value} / стр.
-                      </option>
-                    ))}
-                  </select>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="h-8 border-line-subtle bg-surface-panel"
-                    disabled={jobsMeta.page <= 1}
-                    onClick={() => {
-                      const next = new URLSearchParams(searchParams);
-                      next.set("page", String(Math.max(jobsMeta.page - 1, 1)));
-                      setSearchParams(next);
-                    }}
-                  >
-                    Назад
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="h-8 border-line-subtle bg-surface-panel"
-                    disabled={jobsMeta.page * jobsMeta.pageSize >= jobsMeta.total}
-                    onClick={() => {
-                      const next = new URLSearchParams(searchParams);
-                      next.set("page", String(jobsMeta.page + 1));
-                      setSearchParams(next);
-                    }}
-                  >
-                    Далее
-                  </Button>
-                </div>
-              </div>
+              <PaginationBar
+                page={jobsMeta.page}
+                pageSize={jobsMeta.pageSize}
+                totalRows={jobsMeta.total}
+                rangeStart={jobsMeta.total > 0 ? (jobsMeta.page - 1) * jobsMeta.pageSize + 1 : 0}
+                rangeEnd={
+                  jobsMeta.total > 0
+                    ? Math.min((jobsMeta.page - 1) * jobsMeta.pageSize + jobs.length, jobsMeta.total)
+                    : 0
+                }
+                pageSizeOptions={[12, 24, 48]}
+                itemLabel="загрузок"
+                className="px-4"
+                onPageChange={(nextPage) => {
+                  const next = new URLSearchParams(searchParams);
+                  next.set("page", String(nextPage));
+                  setSearchParams(next);
+                }}
+                onPageSizeChange={(nextPageSize) => {
+                  const next = new URLSearchParams(searchParams);
+                  next.set("pageSize", String(nextPageSize));
+                  next.delete("page");
+                  setSearchParams(next);
+                }}
+              />
             ) : null}
           </>
         )}

@@ -199,6 +199,7 @@ export interface UploadJob {
     | "category_structure"
     | "inbound"
     | "sku_costs"
+    | "management_report"
     | "raw_report";
   sizeBytes: number;
   uploadedAt: string;
@@ -378,6 +379,7 @@ export type AssistantResponseType = "answer" | "clarification";
 export type AssistantResponseStatus =
   | "completed"
   | "partial"
+  | "no_data"
   | "needs_clarification"
   | "unsupported"
   | "failed";

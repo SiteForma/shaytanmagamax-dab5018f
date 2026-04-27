@@ -522,23 +522,29 @@ def import_management_report_workbook(
     *,
     report_year: int | None = 2025,
     imported_by_id: str | None = None,
+    upload_file_id: str | None = None,
+    source_path: str | None = None,
+    file_name: str | None = None,
+    commit: bool = True,
 ) -> ManagementReportImportSummary:
     if not file_path.exists():
         raise FileNotFoundError(file_path)
 
     checksum = _checksum(file_path)
     workbook = load_workbook(file_path, data_only=True, read_only=True)
+    stored_file_name = file_name or file_path.name
 
     report = db.scalar(
         select(ManagementReportImport).where(ManagementReportImport.checksum == checksum)
     )
     if report is None:
         report = ManagementReportImport(
-            file_name=file_path.name,
-            source_path=str(file_path),
+            file_name=stored_file_name,
+            source_path=source_path or str(file_path),
             checksum=checksum,
             report_year=report_year,
             imported_by_id=imported_by_id,
+            upload_file_id=upload_file_id,
             metadata_payload={},
         )
         db.add(report)
@@ -549,10 +555,11 @@ def import_management_report_workbook(
         )
         db.execute(delete(ManagementReportRow).where(ManagementReportRow.import_id == report.id))
         db.execute(delete(OrganizationUnit).where(OrganizationUnit.source_import_id == report.id))
-        report.file_name = file_path.name
-        report.source_path = str(file_path)
+        report.file_name = stored_file_name
+        report.source_path = source_path or str(file_path)
         report.report_year = report_year
         report.imported_by_id = imported_by_id
+        report.upload_file_id = upload_file_id
         db.flush()
 
     sheet_rows: dict[str, list[tuple[int, list[Any]]]] = {}
@@ -651,9 +658,13 @@ def import_management_report_workbook(
         "parser_version": PARSER_VERSION,
         "sheet_names": list(workbook.sheetnames),
         "source_file_size_bytes": file_path.stat().st_size,
+        "upload_file_id": upload_file_id,
     }
 
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
     organization_unit_count = len(
         db.scalars(
             select(OrganizationUnit.id).where(OrganizationUnit.source_import_id == report.id)

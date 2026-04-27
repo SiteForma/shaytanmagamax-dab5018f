@@ -32,8 +32,7 @@ describe("DataTable", () => {
     expect(screen.getByText("Первый")).toBeInTheDocument();
     expect(screen.queryByText("Третий")).not.toBeInTheDocument();
 
-    const buttons = screen.getAllByRole("button");
-    fireEvent.click(buttons[buttons.length - 1]!);
+    fireEvent.click(screen.getByLabelText("Следующая страница"));
 
     expect(screen.getByText("3–4 из 5")).toBeInTheDocument();
     expect(screen.getByText("Третий")).toBeInTheDocument();

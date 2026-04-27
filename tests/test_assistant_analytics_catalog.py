@@ -14,7 +14,9 @@ from apps.api.app.modules.assistant.analytics_catalog import (
 
 def test_metric_catalog_contains_supported_business_metrics() -> None:
     assert METRIC_CATALOG["sales_qty"].source == "sales"
+    assert "продажи" in METRIC_CATALOG["sales_qty"].aliases
     assert METRIC_CATALOG["revenue"].unit == "rub"
+    assert METRIC_CATALOG["revenue"].aggregation == "sum_sales_revenue"
     assert METRIC_CATALOG["unit_cost"].source == "catalog"
     assert METRIC_CATALOG["cost_amount"].source == "sales"
     assert METRIC_CATALOG["gross_profit"].unit == "rub"
@@ -27,6 +29,7 @@ def test_metric_catalog_contains_supported_business_metrics() -> None:
 
 def test_dimension_catalog_contains_supported_dimensions() -> None:
     assert DIMENSION_CATALOG["client"].label == "Клиент"
+    assert "клиент" in DIMENSION_CATALOG["client"].aliases
     assert DIMENSION_CATALOG["sku"].required_capabilities == (("catalog", "read"),)
     assert DIMENSION_CATALOG["brand"].label == "Бренд"
     assert DIMENSION_CATALOG["product_group"].source == "management_report"

@@ -97,6 +97,8 @@
 
 - id: compare_sales_years
   title: Сравнение продаж 2025 с 2024
+  requires_capability: [sales_2024, sales_2025]
+  skip_if_missing: true
   messages:
     - role: user
       text: Сравни продажи 2025 с 2024
@@ -330,6 +332,8 @@
 
 - id: management_report_2025
   title: Управленческий отчёт за 2025
+  requires_capability: [management_report]
+  skip_if_missing: true
   messages:
     - role: user
       text: Покажи управленческий отчёт за 2025
@@ -339,6 +343,8 @@
 
 - id: management_best_group
   title: Самая выгодная товарная группа
+  requires_capability: [management_report]
+  skip_if_missing: true
   messages:
     - role: user
       text: Какая товарная группа самая выгодная?
@@ -348,6 +354,8 @@
 
 - id: management_profitability
   title: Высокая рентабельность
+  requires_capability: [management_report, profitability]
+  skip_if_missing: true
   messages:
     - role: user
       text: Где самая высокая рентабельность?
@@ -356,6 +364,8 @@
 
 - id: management_departments_revenue
   title: Подразделения по выручке
+  requires_capability: [management_report]
+  skip_if_missing: true
   messages:
     - role: user
       text: Сравни подразделения по выручке
@@ -364,6 +374,8 @@
 
 - id: management_pdz
   title: ПДЗ
+  requires_capability: [management_report, pdz]
+  skip_if_missing: true
   messages:
     - role: user
       text: Что известно по ПДЗ?
@@ -372,6 +384,8 @@
 
 - id: management_margin_drop
   title: Просела маржа
+  requires_capability: [management_report, margin]
+  skip_if_missing: true
   messages:
     - role: user
       text: Где просела маржа?
@@ -440,7 +454,8 @@
   expect:
     intent: analytics_slice
     tool: get_analytics_slice
-    status: partial
+    status: no_data
+    must_include_any: [нет данных, доступный диапазон]
 
 - id: nonexistent_sku
   title: Несуществующий SKU
@@ -583,6 +598,15 @@
   messages:
     - role: user
       text: кто написал Евгения Онегина?
+  expect:
+    intent: unsupported_or_ambiguous
+    status: unsupported
+
+- id: weather_still_unsupported
+  title: Погода остаётся unsupported
+  messages:
+    - role: user
+      text: какая погода завтра?
   expect:
     intent: unsupported_or_ambiguous
     status: unsupported
