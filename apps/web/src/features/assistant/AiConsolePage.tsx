@@ -91,6 +91,10 @@ const ASSISTANT_COLUMN_LABELS: Record<string, string> = {
   estimatedProfit: "Расчётная прибыль",
   estimatedProfitRub: "Расчётная прибыль",
   revenue: "Выручка",
+  unit_cost: "Себестоимость",
+  cost_amount: "Себестоимость",
+  gross_profit: "Валовая прибыль",
+  gross_margin_pct: "Валовая маржа",
   profitability: "Рентабельность",
   profitabilityPct: "Рентабельность",
   profitability_pct: "Рентабельность",
@@ -100,6 +104,10 @@ function formatMetricName(value: string) {
   return (
     {
       revenue: "Выручка",
+      unit_cost: "Себестоимость",
+      cost_amount: "Себестоимость",
+      gross_profit: "Валовая прибыль",
+      gross_margin_pct: "Валовая маржа",
       profitability: "Рентабельность",
       profitability_pct: "Рентабельность",
       growth_rate: "Рост / падение",

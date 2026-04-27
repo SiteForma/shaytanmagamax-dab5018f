@@ -6,6 +6,7 @@ export const SOURCE_TYPE_LABELS: Record<UploadJob["sourceType"], string> = {
   diy_clients: "клиенты DIY",
   category_structure: "структура категорий",
   inbound: "поставки",
+  sku_costs: "себестоимость",
   raw_report: "сырой отчёт",
 };
 
@@ -37,6 +38,8 @@ const CANONICAL_FIELD_LABELS: Record<string, string> = {
   category_level_3: "категория 3 уровня",
   eta_date: "дата поставки",
   status: "статус",
+  article: "артикул",
+  cost_rub: "себестоимость",
   raw_value: "сырое значение",
 };
 

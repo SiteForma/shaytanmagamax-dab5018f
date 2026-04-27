@@ -29,6 +29,8 @@ from apps.api.app.db.models import (
 )
 from apps.api.app.db.models import UploadFile as UploadFileModel
 from apps.api.app.modules.analytics.service import materialize_analytics
+from apps.api.app.modules.catalog.brand import resolve_brand
+from apps.api.app.modules.catalog.cost_import import import_sku_costs_from_upload
 from apps.api.app.modules.mapping.schemas import MappingFieldResponse, MappingStateResponse
 from apps.api.app.modules.mapping.service import (
     build_mapping_fields,
@@ -40,6 +42,10 @@ from apps.api.app.modules.mapping.service import (
     resolve_client_by_name_or_alias,
     resolve_sku_by_code_or_alias,
     source_supports_apply,
+)
+from apps.api.app.modules.uploads.assortment_import import (
+    import_assortment_from_upload,
+    is_assortment_frame,
 )
 from apps.api.app.modules.uploads.parsers import (
     build_preview_payload,
@@ -63,6 +69,10 @@ from apps.api.app.modules.uploads.schemas import (
     UploadSourceTypeCandidateResponse,
     UploadValidationSummaryResponse,
 )
+from apps.api.app.modules.uploads.stock_import import (
+    import_warehouse_stock_from_upload,
+    is_warehouse_stock_frame,
+)
 from apps.api.app.modules.uploads.storage import get_object_storage
 from apps.api.app.modules.uploads.validation import ValidationIssue, validate_frame
 
@@ -72,10 +82,12 @@ SOURCE_TYPES = {
     "diy_clients",
     "category_structure",
     "inbound",
+    "sku_costs",
     "raw_report",
 }
 BLOCKING_SEVERITIES = {"error", "critical"}
 RAW_REPORT_REVIEW_STATUS = "ready_to_review"
+AUTO_APPLY_SOURCE_TYPES = {"sku_costs"}
 
 
 def _normalized_severity(value: str) -> str:
@@ -250,18 +262,24 @@ def _readiness(batch: UploadBatch) -> UploadReadinessResponse:
     has_blocking_issues = bool(validation_payload.get("has_blocking_issues", False))
     supports_apply = source_supports_apply(batch.source_type)
     detection_payload = dict(batch.mapping_payload.get("source_detection") or {})
+    auto_adapter = bool(
+        batch.mapping_payload.get("stock_adapter")
+        or batch.mapping_payload.get("assortment_adapter")
+    )
     source_confirmed = not detection_payload.get("requires_confirmation") or bool(
         detection_payload.get("confirmed")
     )
     return UploadReadinessResponse(
         can_apply=bool(
             supports_apply
+            and not auto_adapter
             and batch.status in {"ready_to_apply", "applied_with_warnings", "applied"}
             and not has_blocking_issues
             and source_confirmed
         ),
         can_validate=bool(batch.mapping_payload.get("active_mapping"))
-        and batch.source_type != "raw_report"
+        and batch.source_type not in {"raw_report", "sku_costs"}
+        and not auto_adapter
         and source_confirmed,
         can_edit_mapping=batch.status not in {"applying"},
     )
@@ -539,6 +557,34 @@ def _run_parse_stage(
         detected_source_type = detect_source_type(
             [str(column) for column in frame.columns], source_type_hint
         )
+        if source_type_hint is None and is_warehouse_stock_frame(frame):
+            detected_source_type = "stock"
+            source_candidates = [
+                {
+                    "source_type": "stock",
+                    "confidence": 0.98,
+                    "matched_fields": ["sku_code", "product_name", "stock_free", "warehouse_name"],
+                },
+                *[
+                    candidate
+                    for candidate in source_candidates
+                    if candidate.get("source_type") != "stock"
+                ],
+            ][:5]
+        elif source_type_hint is None and is_assortment_frame(frame, file_model.file_name):
+            detected_source_type = "category_structure"
+            source_candidates = [
+                {
+                    "source_type": "category_structure",
+                    "confidence": 0.98,
+                    "matched_fields": ["sku_code", "product_name", "category_hierarchy"],
+                },
+                *[
+                    candidate
+                    for candidate in source_candidates
+                    if candidate.get("source_type") != "category_structure"
+                ],
+            ][:5]
         batch.source_type = detected_source_type
         batch.detected_source_type = detected_source_type
         file_model.source_type = detected_source_type
@@ -569,8 +615,14 @@ def _run_parse_stage(
             "active_mapping": active_mapping,
             "required_fields": sorted(required_fields),
             "source_detection": {
-                "requires_confirmation": require_source_confirmation,
-                "confirmed": not require_source_confirmation,
+                "requires_confirmation": (
+                    require_source_confirmation
+                    and detected_source_type not in AUTO_APPLY_SOURCE_TYPES
+                ),
+                "confirmed": (
+                    not require_source_confirmation
+                    or detected_source_type in AUTO_APPLY_SOURCE_TYPES
+                ),
                 "detected_source_type": detected_source_type,
                 "selected_source_type": detected_source_type,
                 "candidates": source_candidates,
@@ -578,7 +630,31 @@ def _run_parse_stage(
             },
         }
         db.execute(delete(UploadedRowIssue).where(UploadedRowIssue.batch_id == batch.id))
-        if require_source_confirmation:
+        _refresh_quality_issues(db, batch, file_model, [])
+        if detected_source_type == "sku_costs":
+            import_sku_costs_from_upload(
+                db,
+                get_object_storage(settings),
+                file_model.id,
+                commit=False,
+            )
+        elif detected_source_type == "stock" and is_warehouse_stock_frame(frame):
+            import_warehouse_stock_from_upload(
+                db,
+                get_object_storage(settings),
+                file_model.id,
+                commit=False,
+            )
+        elif detected_source_type == "category_structure" and is_assortment_frame(
+            frame, file_model.file_name
+        ):
+            import_assortment_from_upload(
+                db,
+                get_object_storage(settings),
+                file_model.id,
+                commit=False,
+            )
+        elif require_source_confirmation:
             batch.validation_payload = {
                 "validated_at": None,
                 "valid_rows": 0,
@@ -710,12 +786,14 @@ def validate_upload_file(
 
 
 def _get_or_create_product(
-    db: Session, product_name: str | None, brand: str = "MAGAMAX"
+    db: Session, product_name: str | None, brand: str | None = None
 ) -> Product | None:
     if not product_name:
         return None
+    brand = brand or resolve_brand(None, product_name)
     existing = db.scalars(select(Product).where(Product.name == product_name)).first()
     if existing:
+        existing.brand = brand
         return existing
     product = Product(name=product_name, brand=brand)
     db.add(product)
@@ -735,14 +813,17 @@ def _get_or_create_sku(
             existing.name = product_name
         if category is not None:
             existing.category_id = category.id
+        if product_name:
+            existing.brand = resolve_brand(existing.brand, product_name, sku_code)
         return existing
-    product = _get_or_create_product(db, product_name)
+    brand = resolve_brand(None, product_name, sku_code)
+    product = _get_or_create_product(db, product_name, brand=brand)
     sku = Sku(
         article=sku_code,
         name=product_name or sku_code,
         product_id=product.id if product else None,
         category_id=category.id if category else None,
-        brand="MAGAMAX",
+        brand=brand,
         unit="pcs",
         active=True,
     )

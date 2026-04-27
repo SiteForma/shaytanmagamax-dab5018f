@@ -15,6 +15,7 @@ from apps.api.app.core.config import Settings
 from apps.api.app.core.errors import DomainError
 from apps.api.app.db.models import Client, InboundDelivery, Product, Sku
 from apps.api.app.modules.audit.service import record_audit_event
+from apps.api.app.modules.catalog.brand import resolve_brand
 from apps.api.app.modules.inbound.schemas import InboundSyncResponse, InboundTimelineResponse
 from apps.api.app.modules.mapping.service import (
     normalize_mapping_token,
@@ -208,10 +209,11 @@ def _get_or_create_sku(db: Session, article: str) -> tuple[Sku, bool]:
     sku = resolve_sku_by_code_or_alias(db, article)
     if sku is not None:
         return sku, False
-    product = Product(name=article, brand="MAGAMAX", active=True)
+    brand = resolve_brand(None, article)
+    product = Product(name=article, brand=brand, active=True)
     db.add(product)
     db.flush()
-    sku = Sku(article=article, name=article, product_id=product.id, brand="MAGAMAX", unit="pcs")
+    sku = Sku(article=article, name=article, product_id=product.id, brand=brand, unit="pcs")
     db.add(sku)
     db.flush()
     return sku, True

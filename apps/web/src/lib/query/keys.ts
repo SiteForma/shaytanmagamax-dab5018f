@@ -23,6 +23,7 @@ export const queryKeys = {
   catalog: {
     all: ["catalog"] as const,
     skus: (query: string) => ["catalog", "skus", query] as const,
+    skuCosts: (query: string) => ["catalog", "sku-costs", query] as const,
     skuDetail: (skuId: string | null) => ["catalog", "sku-detail", skuId] as const,
   },
   stock: {

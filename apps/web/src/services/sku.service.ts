@@ -10,9 +10,38 @@ export async function listSkus(query?: string): Promise<Sku[]> {
     article: item.article,
     name: item.name,
     category: item.category,
+    categoryPath: item.category_path,
     brand: item.brand,
     unit: item.unit,
     active: item.active,
+    costRub: item.cost_rub,
+    costProductName: item.cost_product_name,
+  }));
+}
+
+export interface SkuCostItem {
+  article: string;
+  productName: string;
+  costRub: number;
+  uploadFileId?: string | null;
+  sourceRowNumber?: number | null;
+  updatedAt: string;
+}
+
+export async function listSkuCosts(query?: string): Promise<SkuCostItem[]> {
+  const params = new URLSearchParams();
+  params.set("limit", "10000");
+  if (query) {
+    params.set("query", query);
+  }
+  const response = await api.get<any[]>(`/catalog/sku-costs?${params.toString()}`);
+  return response.map((item) => ({
+    article: item.article,
+    productName: item.product_name,
+    costRub: item.cost_rub,
+    uploadFileId: item.upload_file_id,
+    sourceRowNumber: item.source_row_number,
+    updatedAt: item.updated_at,
   }));
 }
 
@@ -36,6 +65,14 @@ export interface SkuDetail {
     worstStatus: string;
     latestRunId?: string | null;
   } | null;
+  cost?: {
+    article: string;
+    productName: string;
+    costRub: number;
+    uploadFileId?: string | null;
+    sourceRowNumber?: number | null;
+    updatedAt: string;
+  } | null;
 }
 
 export async function getSkuDetail(skuId: string): Promise<SkuDetail | null> {
@@ -47,9 +84,12 @@ export async function getSkuDetail(skuId: string): Promise<SkuDetail | null> {
         article: response.sku.article,
         name: response.sku.name,
         category: response.sku.category,
+        categoryPath: response.sku.category_path,
         brand: response.sku.brand,
         unit: response.sku.unit,
         active: response.sku.active,
+        costRub: response.sku.cost_rub,
+        costProductName: response.sku.cost_product_name,
       },
       sales: response.sales.map((item: any): MonthlySalesPoint => ({
         month: item.month,
@@ -98,6 +138,16 @@ export async function getSkuDetail(skuId: string): Promise<SkuDetail | null> {
             avgCoverageMonths: response.reserve_summary.avg_coverage_months,
             worstStatus: response.reserve_summary.worst_status,
             latestRunId: response.reserve_summary.latest_run_id,
+          }
+        : null,
+      cost: response.cost
+        ? {
+            article: response.cost.article,
+            productName: response.cost.product_name,
+            costRub: response.cost.cost_rub,
+            uploadFileId: response.cost.upload_file_id,
+            sourceRowNumber: response.cost.source_row_number,
+            updatedAt: response.cost.updated_at,
           }
         : null,
     };

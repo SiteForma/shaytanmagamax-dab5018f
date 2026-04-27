@@ -2,6 +2,7 @@ import { useState } from "react";
 import {
   ColumnDef,
   ColumnFiltersState,
+  PaginationState,
   SortingState,
   Updater,
   VisibilityState,
@@ -93,10 +94,16 @@ export function DataTable<T>({
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({});
   const [globalFilter, setGlobalFilter] = useState("");
-  const [pageSize, setPageSize] = useState(initialPageSize);
+  const [pagination, setPagination] = useState<PaginationState>({
+    pageIndex: 0,
+    pageSize: initialPageSize,
+  });
   const resolvedSorting = sortingState ?? sorting;
   const resolvedGlobalFilter = searchValue ?? globalFilter;
-  const resolvedPageSize = controlledPageSize ?? pageSize;
+  const resolvedPageSize = controlledPageSize ?? pagination.pageSize;
+  const resolvedPagination = manualPagination
+    ? { pageIndex: Math.max(page - 1, 0), pageSize: resolvedPageSize }
+    : { pageIndex: pagination.pageIndex, pageSize: resolvedPageSize };
 
   function applySortingChange(updater: Updater<SortingState>) {
     const next = typeof updater === "function" ? updater(resolvedSorting) : updater;
@@ -104,10 +111,18 @@ export function DataTable<T>({
       onSortingChange(next);
       return;
     }
+    if (!manualPagination) {
+      setPagination((current) => ({ ...current, pageIndex: 0 }));
+    }
     setSorting(next);
   }
 
   function applySearchChange(value: string) {
+    if (manualPagination) {
+      onPageChange?.(1);
+    } else {
+      setPagination((current) => ({ ...current, pageIndex: 0 }));
+    }
     if (onSearchChange) {
       onSearchChange(value);
       return;
@@ -123,12 +138,16 @@ export function DataTable<T>({
       columnFilters,
       columnVisibility,
       globalFilter: resolvedGlobalFilter,
-      pagination: {
-        pageIndex: manualPagination ? Math.max(page - 1, 0) : 0,
-        pageSize: resolvedPageSize,
-      },
+      pagination: resolvedPagination,
     },
     onSortingChange: applySortingChange,
+    onPaginationChange: (updater) => {
+      if (manualPagination) {
+        return;
+      }
+      const next = typeof updater === "function" ? updater(resolvedPagination) : updater;
+      setPagination(next);
+    },
     onColumnFiltersChange: setColumnFilters,
     onColumnVisibilityChange: setColumnVisibility,
     onGlobalFilterChange: applySearchChange,
@@ -308,8 +327,7 @@ export function DataTable<T>({
                 onPageChange?.(1);
                 return;
               }
-              setPageSize(n);
-              table.setPageSize(n);
+              setPagination({ pageIndex: 0, pageSize: n });
             }}
             className="h-7 rounded-md border border-line-subtle bg-surface-panel px-2 text-xs text-ink focus-ring"
           >

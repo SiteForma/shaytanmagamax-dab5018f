@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-AnalyticsSource = Literal["sales", "stock", "reserve", "inbound", "management_report"]
+AnalyticsSource = Literal["sales", "stock", "reserve", "inbound", "management_report", "catalog"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,6 +59,23 @@ METRIC_ALIASES: dict[str, str] = {
     "продажи": "sales_qty",
     "выручка": "revenue",
     "оборот": "revenue",
+    "себестоимость": "unit_cost",
+    "себесстоимость": "unit_cost",
+    "себестоимость за единицу": "unit_cost",
+    "цена себестоимости": "unit_cost",
+    "cost_of_goods_sold": "unit_cost",
+    "unit_cost": "unit_cost",
+    "затраты": "cost_amount",
+    "себестоимость продаж": "cost_amount",
+    "прибыль": "gross_profit",
+    "валовая прибыль": "gross_profit",
+    "заработали": "gross_profit",
+    "profit": "gross_profit",
+    "gross_profit": "gross_profit",
+    "маржинальность": "gross_margin_pct",
+    "валовая маржа": "gross_margin_pct",
+    "margin_pct": "gross_margin_pct",
+    "gross_margin_pct": "gross_margin_pct",
     "остаток": "stock_qty",
     "остатки": "stock_qty",
     "склад": "stock_qty",
@@ -82,6 +99,8 @@ DIMENSION_ALIASES: dict[str, str] = {
     "sku": "sku",
     "артикул": "article",
     "артикулы": "article",
+    "бренд": "brand",
+    "бренды": "brand",
     "категория": "category",
     "категории": "category",
     "тг": "product_group",
@@ -99,10 +118,21 @@ DIMENSION_ALIASES: dict[str, str] = {
     "регионы": "region",
 }
 
-SALES_DIMENSIONS = ("client", "sku", "article", "category", "month", "quarter", "year", "region")
-STOCK_DIMENSIONS = ("sku", "article", "category", "warehouse", "month", "quarter", "year")
-RESERVE_DIMENSIONS = ("client", "sku", "article", "category")
-INBOUND_DIMENSIONS = ("sku", "article", "category", "month", "quarter", "year")
+SALES_DIMENSIONS = (
+    "client",
+    "sku",
+    "article",
+    "brand",
+    "category",
+    "month",
+    "quarter",
+    "year",
+    "region",
+)
+CATALOG_DIMENSIONS = ("sku", "article", "brand", "category")
+STOCK_DIMENSIONS = ("sku", "article", "brand", "category", "warehouse", "month", "quarter", "year")
+RESERVE_DIMENSIONS = ("client", "sku", "article", "brand", "category")
+INBOUND_DIMENSIONS = ("sku", "article", "brand", "category", "month", "quarter", "year")
 REPORT_DIMENSIONS = ("product_group", "category", "year")
 
 METRIC_CATALOG: dict[str, MetricSpec] = {
@@ -123,6 +153,42 @@ METRIC_CATALOG: dict[str, MetricSpec] = {
         unit="rub",
         supported_dimensions=SALES_DIMENSIONS,
         required_capabilities=(("sales", "read"),),
+    ),
+    "cost_amount": MetricSpec(
+        key="cost_amount",
+        label="Себестоимость продаж",
+        source="sales",
+        expression_type="sum_sales_cost_amount",
+        unit="rub",
+        supported_dimensions=SALES_DIMENSIONS,
+        required_capabilities=(("sales", "read"), ("catalog", "read")),
+    ),
+    "unit_cost": MetricSpec(
+        key="unit_cost",
+        label="Себестоимость за ед.",
+        source="catalog",
+        expression_type="latest_sku_unit_cost",
+        unit="rub",
+        supported_dimensions=CATALOG_DIMENSIONS,
+        required_capabilities=(("catalog", "read"),),
+    ),
+    "gross_profit": MetricSpec(
+        key="gross_profit",
+        label="Валовая прибыль",
+        source="sales",
+        expression_type="sum_gross_profit",
+        unit="rub",
+        supported_dimensions=SALES_DIMENSIONS,
+        required_capabilities=(("sales", "read"), ("catalog", "read")),
+    ),
+    "gross_margin_pct": MetricSpec(
+        key="gross_margin_pct",
+        label="Валовая маржа",
+        source="sales",
+        expression_type="gross_profit_over_revenue_pct",
+        unit="pct",
+        supported_dimensions=SALES_DIMENSIONS,
+        required_capabilities=(("sales", "read"), ("catalog", "read")),
     ),
     "stock_qty": MetricSpec(
         key="stock_qty",
@@ -202,6 +268,7 @@ DIMENSION_CATALOG: dict[str, DimensionSpec] = {
     "client": DimensionSpec("client", "Клиент", "shared", "client_name", (("clients", "read"),)),
     "sku": DimensionSpec("sku", "SKU", "shared", "sku_name", (("catalog", "read"),)),
     "article": DimensionSpec("article", "Артикул", "shared", "sku_article", (("catalog", "read"),)),
+    "brand": DimensionSpec("brand", "Бренд", "shared", "sku_brand", (("catalog", "read"),)),
     "category": DimensionSpec(
         "category", "Категория", "shared", "category_name", (("catalog", "read"),)
     ),

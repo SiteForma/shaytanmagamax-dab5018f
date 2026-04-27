@@ -8,9 +8,12 @@ class SkuListItem(ORMModel):
     article: str
     name: str
     category: str | None = None
+    category_path: str | None = None
     brand: str
     unit: str
     active: bool
+    cost_rub: float | None = None
+    cost_product_name: str | None = None
 
 
 class MonthlySalesPoint(ORMModel):
@@ -58,6 +61,15 @@ class SkuReserveSummaryResponse(ORMModel):
     latest_run_id: str | None = None
 
 
+class SkuCostResponse(ORMModel):
+    article: str
+    product_name: str
+    cost_rub: float
+    upload_file_id: str | None = None
+    source_row_number: int | None = None
+    updated_at: str
+
+
 class SkuDetailResponse(ORMModel):
     sku: SkuListItem
     sales: list[MonthlySalesPoint]
@@ -65,3 +77,4 @@ class SkuDetailResponse(ORMModel):
     inbound: list[InboundDeliveryView]
     client_split: list[SkuClientSplitView]
     reserve_summary: SkuReserveSummaryResponse | None = None
+    cost: SkuCostResponse | None = None

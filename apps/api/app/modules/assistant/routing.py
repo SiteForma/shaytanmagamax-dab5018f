@@ -357,6 +357,11 @@ def _is_analytics_slice_question(question: str) -> bool:
         "дефицит",
         "покрыт",
         "постав",
+        "себестоим",
+        "себесстоим",
+        "прибыл",
+        "марж",
+        "заработ",
     )
     return any(token in question for token in slice_tokens) and any(
         token in question for token in metric_tokens
@@ -404,6 +409,8 @@ def _detect_intent(question: str) -> str:
         return "management_report_summary"
     if _is_management_report_question(q):
         return "management_report_summary"
+    if any(token in q for token in ("себестоим", "себесстоим", "прибыл", "маржин", "заработ")):
+        return "analytics_slice"
     if _is_month_performance_question(q):
         return "analytics_slice"
     if any(phrase in q for phrase in ("как дела по ", "что по клиент", "как дела с ")):

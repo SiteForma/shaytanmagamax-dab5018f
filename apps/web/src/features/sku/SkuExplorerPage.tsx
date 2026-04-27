@@ -8,7 +8,7 @@ import { Skeleton } from "@/components/ui-ext/Skeleton";
 import { useSkuDetailQuery, useSkusQuery } from "@/hooks/queries/use-sku";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { StatusBadge } from "@/components/ui-ext/StatusBadge";
-import { fmtInt, fmtMonths } from "@/lib/formatters";
+import { fmtInt, fmtMonths, fmtRub } from "@/lib/formatters";
 import { Boxes } from "lucide-react";
 
 export default function SkuExplorerPage() {
@@ -18,6 +18,7 @@ export default function SkuExplorerPage() {
   const detailQuery = useSkuDetailQuery(selectedSkuId);
   const skus = skusQuery.data ?? [];
   const detail = detailQuery.data ?? null;
+  const detailCategory = detail?.sku.categoryPath ?? detail?.sku.category ?? "Категория не подтянута";
 
   function openSku(skuId: string) {
     setSearchParams({ sku: skuId });
@@ -26,7 +27,18 @@ export default function SkuExplorerPage() {
   const columns: ColumnDef<any>[] = [
     { accessorKey: "article", header: "Артикул", cell: (i) => <span className="text-num font-medium text-ink">{i.getValue() as string}</span> },
     { accessorKey: "name", header: "Товар" },
-    { accessorKey: "category", header: "Категория", cell: (i) => <span className="chip">{i.getValue() as string}</span> },
+    {
+      accessorKey: "category",
+      header: "Категория",
+      cell: (i) => {
+        const value = i.getValue() as string | null | undefined;
+        return value ? <span className="chip">{value}</span> : <span className="text-ink-muted">—</span>;
+      },
+    },
+    { accessorKey: "costRub", header: "Себестоимость", meta: { align: "right" }, cell: (i) => {
+      const value = i.getValue() as number | null | undefined;
+      return value == null ? <span className="text-ink-muted">—</span> : <span className="text-num font-medium text-ink">{fmtRub(value)}</span>;
+    } },
     { accessorKey: "brand", header: "Бренд" },
     { accessorKey: "unit", header: "Ед.", meta: { align: "center" }, cell: (i) => ({ pcs: "шт.", set: "комп.", m: "м" } as any)[i.getValue() as string] ?? (i.getValue() as string) },
     { accessorKey: "active", header: "Статус", cell: (i) => (i.getValue() ? <span className="text-success text-xs">Активен</span> : <span className="text-ink-muted text-xs">Не активен</span>) },
@@ -74,7 +86,7 @@ export default function SkuExplorerPage() {
               <SheetHeader>
                 <SheetTitle className="text-ink">{detail.sku.name}</SheetTitle>
                 <SheetDescription className="text-xs text-ink-muted">
-                  {detail.sku.article} · {detail.sku.category ?? "Без категории"}
+                  {detail.sku.article} · {detailCategory}
                 </SheetDescription>
               </SheetHeader>
               <div className="mt-6 space-y-5 text-sm">
@@ -98,6 +110,26 @@ export default function SkuExplorerPage() {
                       <div><div className="text-ink-muted">Свободно</div><div className="text-num font-medium">{fmtInt(detail.stock.freeStock)}</div></div>
                       <div><div className="text-ink-muted">Резерв-подобно</div><div className="text-num font-medium">{fmtInt(detail.stock.reservedLike)}</div></div>
                       <div><div className="text-ink-muted">Склад</div><div className="font-medium text-ink">{detail.stock.warehouse}</div></div>
+                    </div>
+                  </div>
+                )}
+
+                {detail.cost && (
+                  <div className="rounded-md border border-line-subtle bg-surface-muted/30 p-3">
+                    <div className="mb-2 text-[11px] uppercase tracking-wide text-ink-muted">Себестоимость</div>
+                    <div className="grid grid-cols-2 gap-3 text-xs">
+                      <div>
+                        <div className="text-ink-muted">Артикул</div>
+                        <div className="text-num font-medium text-ink">{detail.cost.article}</div>
+                      </div>
+                      <div>
+                        <div className="text-ink-muted">Себестоимость</div>
+                        <div className="text-num font-medium text-ink">{fmtRub(detail.cost.costRub)}</div>
+                      </div>
+                      <div className="col-span-2">
+                        <div className="text-ink-muted">Наименование из файла</div>
+                        <div className="font-medium text-ink">{detail.cost.productName}</div>
+                      </div>
                     </div>
                   </div>
                 )}

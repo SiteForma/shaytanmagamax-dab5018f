@@ -63,9 +63,12 @@ export interface Sku {
   article: string;
   name: string;
   category: SkuCategory | string | null;
+  categoryPath?: string | null;
   brand: string;
   unit: string;
   active: boolean;
+  costRub?: number | null;
+  costProductName?: string | null;
 }
 
 export interface DiyClient {
@@ -195,6 +198,7 @@ export interface UploadJob {
     | "diy_clients"
     | "category_structure"
     | "inbound"
+    | "sku_costs"
     | "raw_report";
   sizeBytes: number;
   uploadedAt: string;

@@ -184,9 +184,15 @@ def _default_year_from_params(params: dict[str, object]) -> int | None:
 
 def _metric_from_question(question: str) -> str | None:
     q = question.lower()
+    if any(token in q for token in ("себестоим", "себесстоим", "затрат")):
+        return "cost_amount" if "продаж" in q or "затрат" in q else "unit_cost"
+    if any(token in q for token in ("прибыл", "заработ")):
+        return "gross_profit"
+    if any(token in q for token in ("маржин", "валовая маржа")):
+        return "gross_margin_pct"
     if any(token in q for token in ("штук", "шт", "колич", "quantity", "qty")):
         return "sales_qty"
-    if any(token in q for token in ("выруч", "руб", "revenue", "заработ")):
+    if any(token in q for token in ("выруч", "руб", "revenue")):
         return "revenue"
     if "свобод" in q and "остат" in q:
         return "free_stock"
@@ -198,13 +204,19 @@ def _metric_from_question(question: str) -> str | None:
         return "coverage_months"
     if any(token in q for token in ("постав", "inbound", "пришл", "поступил", "поступл")):
         return "inbound_qty"
-    if any(token in q for token in ("рентаб", "марж")):
+    if "рентаб" in q:
         return "profitability"
     return None
 
 
 def _metrics_from_question(question: str) -> list[str]:
     q = question.lower()
+    if any(token in q for token in ("себестоим", "себесстоим", "затрат")):
+        return ["cost_amount" if "продаж" in q or "затрат" in q else "unit_cost"]
+    if any(token in q for token in ("прибыл", "заработ")):
+        return ["gross_profit"]
+    if any(token in q for token in ("маржин", "валовая маржа")):
+        return ["gross_margin_pct"]
     if any(token in q for token in ("в штуках", "в шт", "штук", "шт", "колич")):
         return ["sales_qty"]
     if any(token in q for token in ("выруч", "руб", "revenue", "заработ")):
@@ -337,6 +349,8 @@ def _params_from_route(
                 params.setdefault("dimensions", ["client", "sku", "article"])
             elif metric_source == "inbound":
                 params.setdefault("dimensions", ["sku", "article"])
+            elif metric_source == "catalog":
+                params.setdefault("dimensions", ["article"])
             else:
                 params.setdefault("dimensions", ["product_group"])
         if "топ" in question.lower() and not params.get("limit"):
@@ -927,7 +941,9 @@ def _compose_free_chat(bundle: AssistantContextBundle, question: str) -> Assista
             body=(
                 "Я могу помочь как внутренний аналитик MAGAMAX. Напишите обычными словами, что посмотреть: "
                 "продажи и выручку, клиентов и сети DIY, SKU и категории, остатки и покрытие склада, "
-                "резерв и дефицит, входящие поставки, качество данных или управленческий отчёт."
+                "резерв и дефицит, входящие поставки, качество данных или управленческий отчёт. "
+                "Артикул — общая связка между ассортиментом, себестоимостью, складом, продажами, "
+                "поставками и резервами, поэтому можно спрашивать срезы по брендам, категориям, SKU и артикулам."
             ),
         )
     ]

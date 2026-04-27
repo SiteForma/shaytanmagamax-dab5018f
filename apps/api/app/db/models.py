@@ -147,6 +147,52 @@ class SkuAlias(TimestampMixin, Base):
     sku: Mapped[Sku] = relationship()
 
 
+class SkuCost(TimestampMixin, Base):
+    __tablename__ = "sku_costs"
+
+    id: Mapped[str] = mapped_column(
+        String(40), primary_key=True, default=lambda: generate_id("skucost")
+    )
+    article: Mapped[str] = mapped_column(String(120), unique=True, index=True)
+    product_name: Mapped[str] = mapped_column(String(255))
+    cost_rub: Mapped[float] = mapped_column(Numeric(18, 4))
+    sku_id: Mapped[str | None] = mapped_column(
+        ForeignKey("skus.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    upload_file_id: Mapped[str | None] = mapped_column(
+        ForeignKey("upload_files.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    source_row_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    raw_payload: Mapped[dict[str, object]] = mapped_column(
+        MutableDict.as_mutable(JSON), default=dict
+    )
+    sku: Mapped[Sku | None] = relationship()
+    upload_file: Mapped["UploadFile | None"] = relationship()
+
+
+class SkuCostHistory(TimestampMixin, Base):
+    __tablename__ = "sku_cost_history"
+
+    id: Mapped[str] = mapped_column(
+        String(40), primary_key=True, default=lambda: generate_id("skucosthist")
+    )
+    article: Mapped[str] = mapped_column(String(120), index=True)
+    product_name: Mapped[str] = mapped_column(String(255))
+    cost_rub: Mapped[float] = mapped_column(Numeric(18, 4))
+    sku_id: Mapped[str | None] = mapped_column(
+        ForeignKey("skus.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    upload_file_id: Mapped[str | None] = mapped_column(
+        ForeignKey("upload_files.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    source_row_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    raw_payload: Mapped[dict[str, object]] = mapped_column(
+        MutableDict.as_mutable(JSON), default=dict
+    )
+    sku: Mapped[Sku | None] = relationship()
+    upload_file: Mapped["UploadFile | None"] = relationship()
+
+
 class Client(TimestampMixin, Base):
     __tablename__ = "clients"
 

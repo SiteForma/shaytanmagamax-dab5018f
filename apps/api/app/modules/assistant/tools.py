@@ -21,6 +21,7 @@ from apps.api.app.db.models import (
     ReserveRun,
     SalesFact,
     Sku,
+    SkuCost,
     StockSnapshot,
     UploadBatch,
 )
@@ -1328,6 +1329,18 @@ def _period_filter(params: dict[str, object]) -> tuple[date | None, date | None]
     if isinstance(period, dict):
         date_from = period.get("date_from") or period.get("from")
         date_to = period.get("date_to") or period.get("to")
+        if not date_from and not date_to:
+            year = period.get("year")
+            month = period.get("month")
+            if str(year).isdigit() and str(month).isdigit():
+                month_int = int(str(month))
+                year_int = int(str(year))
+                if 1 <= month_int <= 12:
+                    next_year = year_int + (1 if month_int == 12 else 0)
+                    next_month = 1 if month_int == 12 else month_int + 1
+                    start = date(year_int, month_int, 1)
+                    end = date(next_year, next_month, 1)
+                    return start, date.fromordinal(end.toordinal() - 1)
     else:
         date_from = params.get("date_from")
         date_to = params.get("date_to")
@@ -1424,7 +1437,7 @@ def _analytics_slice_payload(
             [
                 AssistantWarningData(
                     code="cross_source_slice_not_supported",
-                    message="Пока поддерживаются срезы внутри одного источника: sales, stock, reserve, inbound или management report.",
+                    message="Пока поддерживаются срезы внутри одного источника: sales, stock, reserve, inbound, catalog или management report.",
                     severity="warning",
                 )
             ],
@@ -1441,6 +1454,18 @@ def _analytics_slice_payload(
             route="/sales",
             detail=f"{len(rows)} агрегированных строк",
         )
+        source_refs = [source_ref]
+        if set(metrics).intersection({"cost_amount", "gross_profit", "gross_margin_pct"}):
+            source_refs.append(
+                _source_ref(
+                    source_type="sku_costs",
+                    source_label="Справочник себестоимости SKU",
+                    entity_type="sku_cost",
+                    role="supporting",
+                    route="/sku",
+                    detail="Себестоимость по артикулам из загруженного файла",
+                )
+            )
     elif source == "stock":
         rows = _analytics_stock_rows(db, bundle, params, metrics, dimensions, limit)
         source_ref = _source_ref(
@@ -1451,6 +1476,7 @@ def _analytics_slice_payload(
             route="/stock",
             detail=f"{len(rows)} агрегированных строк",
         )
+        source_refs = [source_ref]
     elif source == "reserve":
         rows = _analytics_reserve_rows(db, bundle, params, metrics, dimensions, limit)
         source_ref = _source_ref(
@@ -1461,6 +1487,7 @@ def _analytics_slice_payload(
             route="/reserve",
             detail=f"{len(rows)} агрегированных строк",
         )
+        source_refs = [source_ref]
     elif source == "inbound":
         rows = _analytics_inbound_rows(db, bundle, params, metrics, dimensions, limit)
         source_ref = _source_ref(
@@ -1471,6 +1498,18 @@ def _analytics_slice_payload(
             route="/inbound",
             detail=f"{len(rows)} агрегированных строк",
         )
+        source_refs = [source_ref]
+    elif source == "catalog":
+        rows = _analytics_sku_cost_rows(db, bundle, params, metrics, dimensions, limit)
+        source_ref = _source_ref(
+            source_type="sku_costs",
+            source_label="Справочник себестоимости SKU",
+            entity_type="sku_cost",
+            role="primary",
+            route="/sku",
+            detail=f"{len(rows)} строк себестоимости",
+        )
+        source_refs = [source_ref]
     else:
         rows = _analytics_management_report_rows(db, params, metrics, dimensions, limit)
         source_ref = _source_ref(
@@ -1481,6 +1520,7 @@ def _analytics_slice_payload(
             route="/reports/management/summary",
             detail=f"{len(rows)} агрегированных строк",
         )
+        source_refs = [source_ref]
 
     sort_by = str(params.get("sort_by") or (metrics[0] if metrics else "")).strip()
     sort_direction = str(params.get("sort_direction") or "desc").lower()
@@ -1525,10 +1565,10 @@ def _analytics_slice_payload(
             ),
             "supported_metrics": sorted(ANALYTICS_METRIC_CATALOG),
             "supported_dimensions": sorted(ANALYTICS_DIMENSION_CATALOG),
-            "sourceRefs": [source_ref],
+            "sourceRefs": source_refs,
         },
         f"Аналитический срез {source}: {len(rows)} строк",
-        [source_ref],
+        source_refs,
         warnings,
     )
 
@@ -1559,22 +1599,35 @@ def _analytics_sales_rows(
         statement = statement.where(SalesFact.client_id == client_id)
     if sku_id:
         statement = statement.where(SalesFact.sku_id == sku_id)
-    if category_id:
-        statement = statement.where(SalesFact.category_id == category_id)
     facts = db.scalars(statement).all()
+    selected_article = str(_filter_value(params, "article") or "").strip().lower()
     client_cache = {item.id: item for item in db.scalars(select(Client)).all()}
     sku_cache = {item.id: item for item in db.scalars(select(Sku)).all()}
+    cost_cache = {item.article: item for item in db.scalars(select(SkuCost)).all()}
     category_cache = {item.id: item for item in db.scalars(select(Category)).all()}
     grouped: dict[tuple[object, ...], dict[str, float]] = {}
+    margin_support: dict[tuple[object, ...], dict[str, float]] = {}
     for fact in facts:
         sku = sku_cache.get(fact.sku_id)
+        if selected_article and (not sku or sku.article.lower() != selected_article):
+            continue
         category = category_cache.get(fact.category_id or (sku.category_id if sku else ""))
+        if category_id and (not category or category.id != category_id):
+            continue
         client = client_cache.get(fact.client_id)
+        quantity = float(fact.quantity or 0)
+        revenue = float(fact.revenue_amount or 0)
+        unit_cost = (
+            float(cost_cache[sku.article].cost_rub) if sku and sku.article in cost_cache else 0.0
+        )
+        cost_amount = quantity * unit_cost
+        gross_profit = revenue - cost_amount
         values = {
             "client": client.name if client else fact.client_id,
             "region": client.region if client else None,
             "sku": sku.name if sku else fact.sku_id,
             "article": sku.article if sku else fact.sku_id,
+            "brand": sku.brand if sku else None,
             "category": category.name if category else None,
             "month": fact.period_month.strftime("%Y-%m"),
             "quarter": f"{fact.period_month.year}-{_quarter_for_month(fact.period_month.month)}",
@@ -1583,10 +1636,25 @@ def _analytics_sales_rows(
         item = grouped.setdefault(
             _group_key(values, dimensions), {metric: 0.0 for metric in metrics}
         )
+        group_key = _group_key(values, dimensions)
         if "sales_qty" in item:
-            item["sales_qty"] += float(fact.quantity or 0)
+            item["sales_qty"] += quantity
         if "revenue" in item:
-            item["revenue"] += float(fact.revenue_amount or 0)
+            item["revenue"] += revenue
+        if "cost_amount" in item:
+            item["cost_amount"] += cost_amount
+        if "gross_profit" in item:
+            item["gross_profit"] += gross_profit
+        if "gross_margin_pct" in item:
+            support = margin_support.setdefault(group_key, {"revenue": 0.0, "profit": 0.0})
+            support["revenue"] += revenue
+            support["profit"] += gross_profit
+    if "gross_margin_pct" in metrics:
+        for key, item in grouped.items():
+            support = margin_support.get(key, {"revenue": 0.0, "profit": 0.0})
+            item["gross_margin_pct"] = (
+                (support["profit"] / support["revenue"]) * 100 if support["revenue"] else 0.0
+            )
     return _sorted_metric_rows(dimensions, grouped, metrics, limit)
 
 
@@ -1599,11 +1667,11 @@ def _analytics_stock_rows(
     limit: int,
 ) -> list[dict[str, object]]:
     snapshots = db.scalars(select(StockSnapshot)).all()
-    latest: dict[str, StockSnapshot] = {}
+    latest_at_by_sku: dict[str, datetime] = {}
     for snapshot in snapshots:
-        current = latest.get(snapshot.sku_id)
-        if current is None or snapshot.snapshot_at > current.snapshot_at:
-            latest[snapshot.sku_id] = snapshot
+        current = latest_at_by_sku.get(snapshot.sku_id)
+        if current is None or snapshot.snapshot_at > current:
+            latest_at_by_sku[snapshot.sku_id] = snapshot.snapshot_at
     sku_cache = {item.id: item for item in db.scalars(select(Sku)).all()}
     category_cache = {item.id: item for item in db.scalars(select(Category)).all()}
     selected_sku_id = (
@@ -1614,7 +1682,9 @@ def _analytics_stock_rows(
         or None
     )
     grouped: dict[tuple[object, ...], dict[str, float]] = {}
-    for snapshot in latest.values():
+    for snapshot in snapshots:
+        if latest_at_by_sku.get(snapshot.sku_id) != snapshot.snapshot_at:
+            continue
         sku = sku_cache.get(snapshot.sku_id)
         if selected_sku_id and snapshot.sku_id != selected_sku_id:
             continue
@@ -1624,6 +1694,7 @@ def _analytics_stock_rows(
         values = {
             "sku": sku.name if sku else snapshot.sku_id,
             "article": sku.article if sku else snapshot.sku_id,
+            "brand": sku.brand if sku else None,
             "category": category.name if category else None,
             "warehouse": snapshot.warehouse_code,
             "month": snapshot.snapshot_at.strftime("%Y-%m"),
@@ -1655,16 +1726,19 @@ def _analytics_reserve_rows(
         str(_filter_value(params, "client_id") or bundle.context.selected_client_id or "") or None
     )
     sku_id = str(_filter_value(params, "sku_id") or bundle.context.selected_sku_id or "") or None
+    sku_cache = {item.id: item for item in db.scalars(select(Sku)).all()}
     grouped: dict[tuple[object, ...], dict[str, float]] = {}
     for row in reserve_rows:
         if client_id and row.client_id != client_id:
             continue
         if sku_id and row.sku_id != sku_id:
             continue
+        sku = sku_cache.get(row.sku_id)
         values = {
             "client": row.client_name,
             "sku": row.product_name,
             "article": row.article,
+            "brand": sku.brand if sku else None,
             "category": row.category,
         }
         item = grouped.setdefault(
@@ -1707,6 +1781,7 @@ def _analytics_inbound_rows(
         values = {
             "sku": sku.name if sku else delivery.sku_id,
             "article": sku.article if sku else delivery.sku_id,
+            "brand": sku.brand if sku else None,
             "category": category.name if category else None,
             "month": delivery.eta_date.strftime("%Y-%m"),
             "quarter": f"{delivery.eta_date.year}-{_quarter_for_month(delivery.eta_date.month)}",
@@ -1717,6 +1792,48 @@ def _analytics_inbound_rows(
         )
         if "inbound_qty" in item:
             item["inbound_qty"] += float(delivery.quantity or 0)
+    return _sorted_metric_rows(dimensions, grouped, metrics, limit)
+
+
+def _analytics_sku_cost_rows(
+    db: Session,
+    bundle: AssistantContextBundle,
+    params: dict[str, object],
+    metrics: list[str],
+    dimensions: list[str],
+    limit: int,
+) -> list[dict[str, object]]:
+    selected_sku_id = (
+        str(_filter_value(params, "sku_id") or bundle.context.selected_sku_id or "") or None
+    )
+    selected_category_id = (
+        str(_filter_value(params, "category_id") or bundle.context.selected_category_id or "")
+        or None
+    )
+    selected_article = str(_filter_value(params, "article") or "").strip().lower()
+    sku_cache = {item.id: item for item in db.scalars(select(Sku)).all()}
+    category_cache = {item.id: item for item in db.scalars(select(Category)).all()}
+    grouped: dict[tuple[object, ...], dict[str, float]] = {}
+    for cost in db.scalars(select(SkuCost)).all():
+        sku = sku_cache.get(cost.sku_id or "")
+        if selected_sku_id and cost.sku_id != selected_sku_id:
+            continue
+        if selected_article and cost.article.lower() != selected_article:
+            continue
+        if selected_category_id and (not sku or sku.category_id != selected_category_id):
+            continue
+        category = category_cache.get(sku.category_id) if sku and sku.category_id else None
+        values = {
+            "sku": sku.name if sku else cost.product_name,
+            "article": cost.article,
+            "brand": sku.brand if sku else None,
+            "category": category.name if category else None,
+        }
+        item = grouped.setdefault(
+            _group_key(values, dimensions), {metric: 0.0 for metric in metrics}
+        )
+        if "unit_cost" in item:
+            item["unit_cost"] = float(cost.cost_rub or 0)
     return _sorted_metric_rows(dimensions, grouped, metrics, limit)
 
 

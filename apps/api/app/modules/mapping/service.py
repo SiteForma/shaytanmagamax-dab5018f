@@ -208,6 +208,24 @@ SOURCE_TYPE_SPECS: dict[str, SourceTypeSpec] = {
             "status": ("status", "статус"),
         },
     ),
+    "sku_costs": SourceTypeSpec(
+        canonical_fields=("article", "product_name", "cost_rub"),
+        required_fields=("article", "product_name", "cost_rub"),
+        synonyms={
+            "article": ("sku", "sku_code", "article", "артикул", "код товара"),
+            "product_name": ("product", "product name", "наименование", "товар"),
+            "cost_rub": (
+                "cost",
+                "cost rub",
+                "cost_rub",
+                "себестоимость",
+                "себесстоимость",
+                "себестоимость руб",
+                "себестоимость, руб",
+            ),
+        },
+        supports_apply=False,
+    ),
     "raw_report": SourceTypeSpec(
         canonical_fields=("source_row_id", "raw_value"),
         required_fields=(),

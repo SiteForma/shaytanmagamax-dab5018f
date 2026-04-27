@@ -48,6 +48,7 @@ ALLOWED_FILTER_FIELDS = frozenset(
         "client_id",
         "client_name",
         "sku_id",
+        "article",
         "sku_ids",
         "sku_codes",
         "category_id",

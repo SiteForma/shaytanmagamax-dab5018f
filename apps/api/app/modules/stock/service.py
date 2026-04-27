@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import and_, asc, case, desc, func, select
+from sqlalchemy import and_, asc, case, desc, func, literal, select
 from sqlalchemy.orm import Session
 
 from apps.api.app.common.pagination import page_offset
@@ -35,9 +35,9 @@ def _latest_stock_subquery():
     return (
         select(
             StockSnapshot.sku_id.label("sku_id"),
-            StockSnapshot.warehouse_code.label("warehouse"),
-            StockSnapshot.free_stock_qty.label("free_stock_qty"),
-            StockSnapshot.reserved_like_qty.label("reserved_like_qty"),
+            literal("Сводный").label("warehouse"),
+            func.sum(StockSnapshot.free_stock_qty).label("free_stock_qty"),
+            func.sum(StockSnapshot.reserved_like_qty).label("reserved_like_qty"),
         )
         .join(
             latest_snapshot,
@@ -46,6 +46,7 @@ def _latest_stock_subquery():
                 StockSnapshot.snapshot_at == latest_snapshot.c.snapshot_at,
             ),
         )
+        .group_by(StockSnapshot.sku_id)
         .subquery()
     )
 

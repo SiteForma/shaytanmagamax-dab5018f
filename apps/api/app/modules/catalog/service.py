@@ -2,14 +2,22 @@ from __future__ import annotations
 
 from collections import defaultdict
 
-from sqlalchemy import desc, select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
-from apps.api.app.db.models import Client, InboundDelivery, SalesFact, Sku, StockSnapshot
+from apps.api.app.db.models import (
+    Client,
+    InboundDelivery,
+    SalesFact,
+    Sku,
+    SkuCost,
+    StockSnapshot,
+)
 from apps.api.app.modules.catalog.schemas import (
     InboundDeliveryView,
     MonthlySalesPoint,
     SkuClientSplitView,
+    SkuCostResponse,
     SkuDetailResponse,
     SkuListItem,
     SkuReserveSummaryResponse,
@@ -19,24 +27,64 @@ from apps.api.app.modules.reserve.read_models import aggregate_sku_reserve_summa
 from apps.api.app.modules.reserve.service import get_portfolio_rows
 
 
-def _serialize_sku(sku: Sku) -> SkuListItem:
+def _cost_view(cost: SkuCost | None) -> SkuCostResponse | None:
+    if cost is None:
+        return None
+    return SkuCostResponse(
+        article=cost.article,
+        product_name=cost.product_name,
+        cost_rub=float(cost.cost_rub),
+        upload_file_id=cost.upload_file_id,
+        source_row_number=cost.source_row_number,
+        updated_at=cost.updated_at.isoformat(),
+    )
+
+
+def _serialize_sku(sku: Sku, cost: SkuCost | None = None) -> SkuListItem:
     return SkuListItem(
         id=sku.id,
         article=sku.article,
-        name=sku.name,
+        name=cost.product_name if cost else sku.name,
         category=sku.category.name if sku.category else None,
+        category_path=sku.category.path if sku.category else None,
         brand=sku.brand,
         unit=sku.unit,
         active=sku.active,
+        cost_rub=float(cost.cost_rub) if cost else None,
+        cost_product_name=cost.product_name if cost else None,
     )
 
 
 def list_skus(db: Session, query: str | None = None) -> list[SkuListItem]:
-    stmt = select(Sku).options(selectinload(Sku.category)).order_by(Sku.article)
+    stmt = (
+        select(Sku, SkuCost)
+        .join(SkuCost, SkuCost.article == Sku.article)
+        .options(selectinload(Sku.category))
+        .order_by(SkuCost.article)
+    )
     if query:
         pattern = f"%{query.lower()}%"
-        stmt = stmt.where((Sku.article.ilike(pattern)) | (Sku.name.ilike(pattern)))
-    return [_serialize_sku(sku) for sku in db.scalars(stmt).all()]
+        stmt = stmt.where(
+            (Sku.article.ilike(pattern))
+            | (Sku.name.ilike(pattern))
+            | (SkuCost.product_name.ilike(pattern))
+        )
+    return [_serialize_sku(sku, cost) for sku, cost in db.execute(stmt).all()]
+
+
+def list_sku_costs(
+    db: Session, query: str | None = None, limit: int = 5000
+) -> list[SkuCostResponse]:
+    stmt = select(SkuCost).order_by(SkuCost.article).limit(limit)
+    if query:
+        pattern = f"%{query.lower()}%"
+        stmt = stmt.where((SkuCost.article.ilike(pattern)) | (SkuCost.product_name.ilike(pattern)))
+    items: list[SkuCostResponse] = []
+    for cost in db.scalars(stmt).all():
+        view = _cost_view(cost)
+        if view is not None:
+            items.append(view)
+    return items
 
 
 def get_sku_sales_history(db: Session, sku_id: str) -> list[MonthlySalesPoint]:
@@ -73,19 +121,28 @@ def get_sku_inbound_timeline(db: Session, sku_id: str) -> list[InboundDeliveryVi
 
 
 def _latest_stock_view(db: Session, sku_id: str) -> StockSnapshotView | None:
-    stock = db.scalars(
-        select(StockSnapshot)
-        .where(StockSnapshot.sku_id == sku_id)
-        .order_by(desc(StockSnapshot.snapshot_at))
+    latest_at = db.scalar(
+        select(func.max(StockSnapshot.snapshot_at)).where(StockSnapshot.sku_id == sku_id)
+    )
+    if latest_at is None:
+        return None
+    stock = db.execute(
+        select(
+            func.sum(StockSnapshot.free_stock_qty).label("free_stock_qty"),
+            func.sum(StockSnapshot.reserved_like_qty).label("reserved_like_qty"),
+        ).where(
+            StockSnapshot.sku_id == sku_id,
+            StockSnapshot.snapshot_at == latest_at,
+        )
     ).first()
     if stock is None:
         return None
     return StockSnapshotView(
-        sku_id=stock.sku_id,
-        free_stock=stock.free_stock_qty,
-        reserved_like=stock.reserved_like_qty,
-        warehouse=stock.warehouse_code,
-        updated_at=stock.snapshot_at.isoformat(),
+        sku_id=sku_id,
+        free_stock=float(stock.free_stock_qty or 0.0),
+        reserved_like=float(stock.reserved_like_qty or 0.0),
+        warehouse="Сводный",
+        updated_at=latest_at.isoformat(),
     )
 
 
@@ -144,12 +201,14 @@ def get_sku_detail(db: Session, sku_id: str) -> SkuDetailResponse | None:
     sku = db.scalar(select(Sku).options(selectinload(Sku.category)).where(Sku.id == sku_id))
     if sku is None:
         return None
+    cost = db.scalar(select(SkuCost).where(SkuCost.article == sku.article))
 
     return SkuDetailResponse(
-        sku=_serialize_sku(sku),
+        sku=_serialize_sku(sku, cost),
         sales=get_sku_sales_history(db, sku_id),
         stock=_latest_stock_view(db, sku_id),
         inbound=get_sku_inbound_timeline(db, sku_id),
         client_split=get_sku_client_split(db, sku_id),
         reserve_summary=get_sku_reserve_summary(db, sku_id),
+        cost=_cost_view(cost),
     )

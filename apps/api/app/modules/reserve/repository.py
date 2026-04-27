@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, timedelta
 
-from sqlalchemy import desc, or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from apps.api.app.db.models import Client, DiyPolicy, InboundDelivery, SalesFact, Sku, StockSnapshot
@@ -98,15 +98,41 @@ def _filtered_skus(
 
 
 def _latest_stock_by_sku(db: Session, sku_ids: list[str]) -> dict[str, StockSnapshot]:
-    latest: dict[str, StockSnapshot] = {}
-    rows = db.scalars(
-        select(StockSnapshot)
+    if not sku_ids:
+        return {}
+    latest_at = (
+        select(
+            StockSnapshot.sku_id.label("sku_id"),
+            func.max(StockSnapshot.snapshot_at).label("snapshot_at"),
+        )
         .where(StockSnapshot.sku_id.in_(sku_ids))
-        .order_by(StockSnapshot.sku_id, desc(StockSnapshot.snapshot_at))
+        .group_by(StockSnapshot.sku_id)
+        .subquery()
+    )
+    rows = db.execute(
+        select(
+            StockSnapshot.sku_id,
+            latest_at.c.snapshot_at,
+            func.sum(StockSnapshot.free_stock_qty).label("free_stock_qty"),
+            func.sum(StockSnapshot.reserved_like_qty).label("reserved_like_qty"),
+        )
+        .join(
+            latest_at,
+            StockSnapshot.sku_id == latest_at.c.sku_id,
+        )
+        .where(StockSnapshot.snapshot_at == latest_at.c.snapshot_at)
+        .group_by(StockSnapshot.sku_id, latest_at.c.snapshot_at)
     ).all()
-    for row in rows:
-        latest.setdefault(row.sku_id, row)
-    return latest
+    return {
+        str(row.sku_id): StockSnapshot(
+            sku_id=str(row.sku_id),
+            warehouse_code="Сводный",
+            snapshot_at=row.snapshot_at,
+            free_stock_qty=float(row.free_stock_qty or 0.0),
+            reserved_like_qty=float(row.reserved_like_qty or 0.0),
+        )
+        for row in rows
+    }
 
 
 def _inbound_by_sku(

@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { queryKeys } from "@/lib/query/keys";
-import { getSkuDetail, listSkus } from "@/services/sku.service";
+import { getSkuDetail, listSkuCosts, listSkus } from "@/services/sku.service";
 
 export function useSkusQuery(query = "") {
   return useQuery({
@@ -14,5 +14,12 @@ export function useSkuDetailQuery(skuId: string | null) {
     queryKey: queryKeys.catalog.skuDetail(skuId),
     queryFn: () => getSkuDetail(skuId as string),
     enabled: Boolean(skuId),
+  });
+}
+
+export function useSkuCostsQuery(query = "") {
+  return useQuery({
+    queryKey: queryKeys.catalog.skuCosts(query),
+    queryFn: () => listSkuCosts(query || undefined),
   });
 }
